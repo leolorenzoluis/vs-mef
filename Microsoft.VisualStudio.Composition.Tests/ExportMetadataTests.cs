@@ -143,6 +143,17 @@
             Assert.IsType<bool>(metadataValue);
         }
 
+        [MefFact(CompositionEngines.V1Compat, typeof(PartWithExportMetadata), typeof(ImportingPartWithMetadataDictionary))]
+        public void ExportTypeIdentityMetadataIsPresent(IContainer container)
+        {
+            var part = container.GetExportedValue<ImportingPartWithMetadataDictionary>();
+
+            object metadataValue;
+            Assert.True(part.ImportingProperty.Metadata.TryGetValue("ExportTypeIdentity", out metadataValue));
+            Assert.IsType(typeof(string), metadataValue);
+            Assert.Equal(typeof(PartWithExportMetadata).FullName, metadataValue);
+        }
+
         #region Metaview filtering tests
 
         [MefFact(CompositionEngines.V1Compat, typeof(ImportingPartOfObjectWithMetadataInterface), typeof(PartWithExportMetadataA), typeof(PartWithExportMetadataB))]
@@ -154,6 +165,24 @@
             Assert.IsType<PartWithExportMetadataA>(importer.ImportingProperty.Value);
             Assert.Equal(null, importer.ImportingProperty.Metadata.SomeStringEnum);
             Assert.Equal(4, importer.ImportingProperty.Metadata.SomeInt);
+        }
+
+        [MefFact(CompositionEngines.V1Compat, typeof(ImportingPartOfObjectWithMetadataInterface), typeof(PartWithExportMetadataSomeStringArray))]
+        public void ImportWithMetadataViewAsFilterAndMetadatumWithStringArrayValue(IContainer container)
+        {
+            var importer = container.GetExportedValue<ImportingPartOfObjectWithMetadataInterface>();
+
+            Assert.IsType<PartWithExportMetadataSomeStringArray>(importer.ImportingProperty.Value);
+            Assert.Equal(new string[] { "alpha", "beta" }, importer.ImportingProperty.Metadata.SomeStringArray);
+        }
+
+        [MefFact(CompositionEngines.V1Compat, typeof(ImportingPartOfObjectWithMetadataInterface), typeof(PartWithExportMetadataSomeStringArray))]
+        public void ImportWithMetadataViewAsFilterOfObjectArrayAndMetadatumWithStringArrayValue(IContainer container)
+        {
+            var importer = container.GetExportedValue<ImportingPartOfObjectWithMetadataInterface>();
+
+            Assert.IsType<PartWithExportMetadataSomeStringArray>(importer.ImportingProperty.Value);
+            Assert.Equal(new object[] { "alpha", "beta" }, importer.ImportingProperty.Metadata.SomeObjectArrayOfStrings);
         }
 
         [MefFact(CompositionEngines.V1Compat, typeof(ImportManyPartOfObjectWithMetadataInterface), typeof(PartWithExportMetadataA), typeof(PartWithExportMetadataB), typeof(PartWithExportMetadataAB))]
@@ -193,6 +222,12 @@
         [MefV1.ExportMetadata("a", "b")]
         [MefV1.ExportMetadata("B", "c")]
         public class PartWithExportMetadataAB { }
+
+        [MefV1.Export("ExportWithMetadata", typeof(object))]
+        [MefV1.ExportMetadata("a", "b")]
+        [MefV1.ExportMetadata("SomeStringArray", new string[] { "alpha", "beta" })]
+        [MefV1.ExportMetadata("SomeObjectArrayOfStrings", new object[] { "alpha", "beta" })]
+        public class PartWithExportMetadataSomeStringArray { }
 
         #endregion
 
@@ -303,7 +338,7 @@
             Assert.Equal(0, result.Count());
         }
 
-        [MefFact(CompositionEngines.V1)]
+        [MefFact(CompositionEngines.V1, typeof(PartWithExportMetadataA), typeof(PartWithExportMetadataB), typeof(PartWithExportMetadataAB))]
         [Trait("Container.GetExport", "Plural")]
         public void GetNamedExportsTMetadata(IContainer container)
         {
@@ -342,7 +377,7 @@
             Assert.IsType<FooExport2>(b.Value);
         }
 
-        [MefFact(CompositionEngines.V1, typeof(FooExport1), typeof(FooExport2))]
+        [MefFact(CompositionEngines.V1Compat, typeof(FooExport1), typeof(FooExport2))]
         [Trait("Container.GetExport", "Plural")]
         public void GetExportsDictionaryMetadata(IContainer container)
         {
@@ -366,6 +401,36 @@
         [MefV1.Export(typeof(IFoo))]
         [MefV1.ExportMetadata("a", "2")]
         public class FooExport2 : IFoo { }
+
+        #endregion
+
+        #region Exported Method ExportTypeIdentity test
+
+        [MefFact(CompositionEngines.V1Compat, typeof(MethodExportingPart), typeof(PartThatImportsMethod))]
+        public void ExportedMethodHasExportTypeIdentityMetadata(IContainer container)
+        {
+            var part = container.GetExportedValue<PartThatImportsMethod>();
+            object metadataValue;
+            Assert.True(part.ImportedMethod.Metadata.TryGetValue("ExportTypeIdentity", out metadataValue));
+            Assert.IsType(typeof(string), metadataValue);
+            Assert.Equal("System.Single(System.Int32,System.Int32)", metadataValue);
+        }
+
+        public class MethodExportingPart
+        {
+            [MefV1.Export]
+            public float Add(int a, int b)
+            {
+                return a + b;
+            }
+        }
+
+        [MefV1.Export]
+        public class PartThatImportsMethod
+        {
+            [MefV1.Import]
+            public Lazy<Func<int, int, float>, IDictionary<string, object>> ImportedMethod { get; set; }
+        }
 
         #endregion
 
@@ -435,6 +500,12 @@
 
             [DefaultValue(null)]
             IEnumerable<string> SomeStringEnum { get; }
+
+            [DefaultValue(null)]
+            string[] SomeStringArray { get; }
+
+            [DefaultValue(null)]
+            object[] SomeObjectArrayOfStrings { get; }
 
             [DefaultValue(4)]
             int SomeInt { get; }
