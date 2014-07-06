@@ -8,7 +8,7 @@
 
     public class LightweightPartDiscoveryV1 : LightweightPartDiscovery
     {
-        public override ComposablePartDefinition CreatePart(CodeAnalysis.INamedTypeSymbol typeSymbol)
+        public override ComposablePartDefinition CreatePart(System.Reflection.Metadata.TypeDefinition typeSymbol)
         {
             throw new NotImplementedException();
         }
