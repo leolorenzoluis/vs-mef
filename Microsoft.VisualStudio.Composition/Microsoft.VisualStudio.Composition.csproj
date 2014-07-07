@@ -64,7 +64,8 @@
     </Reference>
     <Reference Include="System.Core" />
     <Reference Include="System.Threading.Tasks.Dataflow">
-      <HintPath>..\packages\Microsoft.Tpl.Dataflow.4.5.20\lib\portable-net45+win8+wpa81\System.Threading.Tasks.Dataflow.dll</HintPath>
+      <HintPath>..\..\CPS\packages\Microsoft.Tpl.Dataflow.4.5.9\lib\portable-net45+win8\System.Threading.Tasks.Dataflow.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="System.Xml.Linq" />
     <Reference Include="Microsoft.CSharp" />
