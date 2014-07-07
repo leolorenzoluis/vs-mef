@@ -36,13 +36,27 @@
 
                 this.cancellationSource.Token.ThrowIfCancellationRequested();
 
-                var parts = discovery.CreateParts(this.CatalogAssemblies.Select(item => Assembly.LoadFile(item.ItemSpec)));
+                var parts = discovery.CreatePartsAsync(this.CatalogAssemblies.Select(item => Assembly.LoadFile(item.ItemSpec))).GetAwaiter().GetResult();
+                this.cancellationSource.Token.ThrowIfCancellationRequested();
                 var catalog = ComposableCatalog.Create(parts);
+                this.cancellationSource.Token.ThrowIfCancellationRequested();
                 var configuration = CompositionConfiguration.Create(catalog);
+                this.cancellationSource.Token.ThrowIfCancellationRequested();
 
                 if (!string.IsNullOrEmpty(this.DgmlOutputPath))
                 {
                     configuration.CreateDgml().Save(this.DgmlOutputPath);
+                }
+
+                this.cancellationSource.Token.ThrowIfCancellationRequested();
+                if (!configuration.CompositionErrors.IsEmpty)
+                {
+                    foreach (var error in configuration.CompositionErrors.Peek())
+                    {
+                        this.Log.LogError(error.Message);
+                    }
+
+                    return false;
                 }
 
                 this.cancellationSource.Token.ThrowIfCancellationRequested();
@@ -53,7 +67,7 @@
                     assemblyPath,
                     Path.GetFullPath(this.ConfigurationSymbolsPath),
                     Path.GetFullPath(this.ConfigurationSourcePath),
-                    this.cancellationSource.Token).GetAwaiter().GetResult();
+                    cancellationToken: this.cancellationSource.Token).GetAwaiter().GetResult();
             }
             catch (AggregateException ex)
             {

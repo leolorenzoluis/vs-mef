@@ -63,6 +63,16 @@
             Assert.IsType<PartWithExportMetadata>(importingPart.ImportingProperty.Value);
         }
 
+        [MefFact(CompositionEngines.V3EmulatingV2WithNonPublic | CompositionEngines.V1Compat, typeof(ImportingPartWithNonPublicMetadataClass), typeof(PartWithExportMetadata))]
+        public void ImportWithNonPublicMetadataClass(IContainer container)
+        {
+            var importingPart = container.GetExportedValue<ImportingPartWithNonPublicMetadataClass>();
+            Assert.NotNull(importingPart.ImportingProperty);
+            Assert.Equal("b", importingPart.ImportingProperty.Metadata.a);
+            Assert.False(importingPart.ImportingProperty.IsValueCreated);
+            Assert.IsType<PartWithExportMetadata>(importingPart.ImportingProperty.Value);
+        }
+
         [MefFact(CompositionEngines.V2Compat | CompositionEngines.V1Compat, typeof(ImportManyPartWithMetadataClass), typeof(PartWithExportMetadata))]
         public void ImportManyWithMetadataClass(IContainer container)
         {
@@ -114,6 +124,15 @@
             object metadataValue = importer.ImportingProperty.Metadata["SomeName"];
             Assert.Equal(MetadataEnum.Value2, metadataValue);
             Assert.IsType<MetadataEnum>(metadataValue);
+        }
+
+        [MefFact(CompositionEngines.V1Compat, typeof(ExportWithNonPublicEnumMetadata))]
+        public void NonPublicMetadataEnumValue(IContainer container)
+        {
+            var part = container.GetExport<ExportWithNonPublicEnumMetadata, IDictionary<string, object>>();
+            object metadataValue = part.Metadata["SomeName"];
+            Assert.Equal(MetadataEnumNonPublic.Value2, metadataValue);
+            Assert.IsType<MetadataEnumNonPublic>(metadataValue);
         }
 
         [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat, typeof(ExportWithTypeMetadata), typeof(PartThatImportsTypeMetadata))]
@@ -434,6 +453,34 @@
 
         #endregion
 
+        #region Extreme values tests
+
+        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat, typeof(PartImportingExtremeValues), typeof(PartWithExtremeValues))]
+        public void ExportMetadataExtremeValues(IContainer container)
+        {
+            var part = container.GetExportedValue<PartImportingExtremeValues>();
+            Assert.Equal(double.MaxValue, part.ImportingProperty.Metadata["doubleMaxValue"]);
+            Assert.Equal(double.MinValue, part.ImportingProperty.Metadata["doubleMinValue"]);
+            Assert.Equal(float.MaxValue, part.ImportingProperty.Metadata["floatMaxValue"]);
+            Assert.Equal(float.MinValue, part.ImportingProperty.Metadata["floatMinValue"]);
+        }
+
+        [MefV1.Export, Export]
+        [MefV1.ExportMetadata("doubleMaxValue", double.MaxValue), ExportMetadata("doubleMaxValue", double.MaxValue)]
+        [MefV1.ExportMetadata("doubleMinValue", double.MinValue), ExportMetadata("doubleMinValue", double.MinValue)]
+        [MefV1.ExportMetadata("floatMaxValue", float.MaxValue), ExportMetadata("floatMaxValue", float.MaxValue)]
+        [MefV1.ExportMetadata("floatMinValue", float.MinValue), ExportMetadata("floatMinValue", float.MinValue)]
+        public class PartWithExtremeValues { }
+
+        [MefV1.Export, Export]
+        public class PartImportingExtremeValues
+        {
+            [MefV1.Import, Import]
+            public Lazy<PartWithExtremeValues, IDictionary<string, object>> ImportingProperty { get; set; }
+        }
+
+        #endregion
+
         [MefV1.Export, MefV1.PartCreationPolicy(MefV1.CreationPolicy.NonShared)]
         [MefV1.ExportMetadata("a", "b")]
         [Export]
@@ -462,6 +509,14 @@
         {
             [Import, MefV1.Import]
             public Lazy<PartWithExportMetadata, MetadataClass> ImportingProperty { get; set; }
+        }
+
+        [MefV1.Export, MefV1.PartCreationPolicy(MefV1.CreationPolicy.NonShared)]
+        [Export]
+        public class ImportingPartWithNonPublicMetadataClass
+        {
+            [Import, MefV1.Import]
+            internal Lazy<PartWithExportMetadata, NonPublicMetadataClass> ImportingProperty { get; set; }
         }
 
         [MefV1.Export, MefV1.PartCreationPolicy(MefV1.CreationPolicy.NonShared)]
@@ -526,10 +581,24 @@
             public string a { get; set; }
         }
 
+        internal class NonPublicMetadataClass : MetadataClass
+        {
+            public NonPublicMetadataClass(IDictionary<string, object> data)
+                : base(data)
+            {
+            }
+        }
+
         public enum MetadataEnum
         {
             Value1,
             Value2
+        }
+
+        internal enum MetadataEnumNonPublic
+        {
+            Value1,
+            Value2,
         }
 
         [Export]
@@ -537,6 +606,12 @@
         [ExportMetadata("SomeName", MetadataEnum.Value2)]
         [MefV1.ExportMetadata("SomeName", MetadataEnum.Value2)]
         public class ExportWithEnumMetadata { }
+
+        [Export]
+        [MefV1.Export]
+        [ExportMetadata("SomeName", MetadataEnumNonPublic.Value2)]
+        [MefV1.ExportMetadata("SomeName", MetadataEnumNonPublic.Value2)]
+        public class ExportWithNonPublicEnumMetadata { }
 
         [Export]
         [MefV1.Export]

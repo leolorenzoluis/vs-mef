@@ -10,6 +10,9 @@
     using System.Reflection;
     using System.Text;
     using System.Threading.Tasks;
+    using Microsoft.CodeAnalysis;
+    using Microsoft.CodeAnalysis.CSharp;
+    using Microsoft.CodeAnalysis.CSharp.Syntax;
     using Validation;
 
     partial class CompositionTemplateFactory
@@ -19,6 +22,24 @@
         private readonly HashSet<Assembly> relevantAssemblies = new HashSet<Assembly>();
 
         private readonly HashSet<Type> relevantEmbeddedTypes = new HashSet<Type>();
+
+        /// <summary>
+        /// A collection of symbols defined at the level of the generated class.
+        /// </summary>
+        /// <remarks>
+        /// This is useful to ensure that any generated symbol is unique.
+        /// </remarks>
+        private readonly HashSet<string> classSymbols = new HashSet<string>();
+
+        /// <summary>
+        /// A set of local variable names that have already been used in the currently generating part factory method.
+        /// </summary>
+        private readonly HashSet<string> localSymbols = new HashSet<string>();
+
+        /// <summary>
+        /// A lookup table of arbitrary objects to the symbols that have been reserved for them.
+        /// </summary>
+        private readonly Dictionary<object, string> reservedSymbols = new Dictionary<object, string>();
 
         public CompositionConfiguration Configuration { get; set; }
 
@@ -157,84 +178,86 @@
             var importingMember = satisfyingExport.Key.ImportingMember;
             var exports = satisfyingExport.Value;
 
-            var right = new StringWriter();
-            EmitImportSatisfyingExpression(import, exports, right);
-            string rightString = right.ToString();
-            if (rightString.Length > 0)
+            string expression = GetImportSatisfyingExpression(import, exports);
+            using (this.EmitMemberAssignment(import))
             {
-                using (this.EmitMemberAssignment(import))
-                {
-                    this.Write(rightString);
-                }
+                this.Write(expression);
             }
         }
 
-        private void EmitImportSatisfyingExpression(ImportDefinitionBinding import, IReadOnlyList<ExportDefinitionBinding> exports, StringWriter writer)
+        private string GetImportSatisfyingExpression(ImportDefinitionBinding import, IReadOnlyList<ExportDefinitionBinding> exports)
         {
             if (import.ImportDefinition.Cardinality == ImportCardinality.ZeroOrMore)
             {
                 Type enumerableOfTType = typeof(IEnumerable<>).MakeGenericType(import.ImportingSiteTypeWithoutCollection);
                 if (import.ImportingSiteType.IsArray || import.ImportingSiteType.IsEquivalentTo(enumerableOfTType))
                 {
-                    this.EmitSatisfyImportManyArrayOrEnumerable(import, exports);
+                    return this.GetSatisfyImportManyArrayExpression(import, exports);
                 }
                 else
                 {
-                    this.EmitSatisfyImportManyCollection(import, exports);
+                    return this.GetSatisfyImportManyCollectionExpression(import, exports);
                 }
             }
             else if (exports.Any())
             {
-                this.EmitValueFactory(import, exports.Single(), writer);
-            }
-        }
-
-        private void EmitSatisfyImportManyArrayOrEnumerable(ImportDefinitionBinding import, IReadOnlyList<ExportDefinitionBinding> exports)
-        {
-            Requires.NotNull(import, "import");
-            Requires.NotNull(exports, "exports");
-
-            IDisposable memberAssignment = null;
-            if (import.ImportingMember != null)
-            {
-                memberAssignment = this.EmitMemberAssignment(import);
-            }
-
-            this.EmitSatisfyImportManyArrayOrEnumerableExpression(import, exports);
-
-            if (memberAssignment != null)
-            {
-                memberAssignment.Dispose();
-            }
-        }
-
-        private void EmitSatisfyImportManyArrayOrEnumerableExpression(ImportDefinitionBinding import, IEnumerable<ExportDefinitionBinding> exports)
-        {
-            Requires.NotNull(import, "import");
-            Requires.NotNull(exports, "exports");
-
-            this.Write("new ");
-            if (import.ImportingSiteType.IsArray)
-            {
-                this.WriteLine("{0}[]", GetTypeName(import.ImportingSiteTypeWithoutCollection));
+                return this.GetValueFactoryExpression(import, exports.Single());
             }
             else
             {
-                this.WriteLine("List<{0}>", GetTypeName(import.ImportingSiteTypeWithoutCollection));
+                if (IsPublic(import.ImportingSiteType))
+                {
+                    return string.Format(CultureInfo.InvariantCulture, "default({0})", GetTypeName(import.ImportingSiteType));
+                }
+                else if (import.ImportingSiteType.IsValueType)
+                {
+                    // It's a non-public struct. We have to construct its default value by hand.
+                    return string.Format(CultureInfo.InvariantCulture, "Activator.CreateInstance({0})", GetTypeExpression(import.ImportingSiteType));
+                }
+                else
+                {
+                    return string.Format(CultureInfo.InvariantCulture, "({0})null", GetTypeName(import.ImportingSiteType));
+                }
             }
+        }
 
-            this.WriteLine("{");
-            using (Indent())
+        private string GetSatisfyImportManyArrayExpression(ImportDefinitionBinding import, IEnumerable<ExportDefinitionBinding> exports)
+        {
+            Requires.NotNull(import, "import");
+            Requires.NotNull(exports, "exports");
+
+            string localVarName = ReserveLocalVarName(import.ImportingMember != null ? import.ImportingMember.Name : "tmp");
+            this.Write("var {0} = ", localVarName);
+            if (IsPublic(import.ImportingSiteType, true))
             {
+                this.WriteLine("new {0}[]", GetTypeName(import.ImportingSiteTypeWithoutCollection));
+                this.WriteLine("{");
+                using (Indent())
+                {
+                    foreach (var export in exports)
+                    {
+                        this.WriteLine("{0},", this.GetValueFactoryExpression(import, export));
+                    }
+                }
+
+                this.WriteLine("};");
+            }
+            else
+            {
+                // This will require a multi-statement construction of the array.
+                this.WriteLine("Array.CreateInstance({0}, {1});", this.GetTypeExpression(import.ImportingSiteTypeWithoutCollection), exports.Count());
+                int arrayIndex = 0;
                 foreach (var export in exports)
                 {
-                    var valueWriter = new StringWriter();
-                    EmitValueFactory(import, export, valueWriter);
-                    this.WriteLine("{0},", valueWriter);
+                    this.WriteLine(
+                        "{0}.SetValue({1}, {2});",
+                        localVarName,
+                        this.GetValueFactoryExpression(import, export),
+                        arrayIndex++);
                 }
             }
 
-            this.Write("}");
+            return localVarName;
         }
 
         private string EmitOpenGenericExportCollection(ImportDefinition importDefinition, IEnumerable<ExportDefinitionBinding> exports)
@@ -254,7 +277,7 @@
             return localVarName;
         }
 
-        private void EmitSatisfyImportManyCollection(ImportDefinitionBinding import, IReadOnlyList<ExportDefinitionBinding> exports)
+        private string GetSatisfyImportManyCollectionExpression(ImportDefinitionBinding import, IReadOnlyList<ExportDefinitionBinding> exports)
         {
             Requires.NotNull(import, "import");
             var importDefinition = import.ImportDefinition;
@@ -263,20 +286,21 @@
             bool stronglyTypedCollection = IsPublic(elementType, true);
             Type icollectionType = typeof(ICollection<>).MakeGenericType(elementType);
             string importManyLocalVarTypeName = stronglyTypedCollection ? GetTypeName(icollectionType) : "object";
+            string tempVarName = ReserveLocalVarName(import.ImportingMember.Name);
 
             // Casting the collection to ICollection<T> instead of the concrete type guarantees
             // that we'll be able to call Add(T) and Clear() on it even if the type is NonPublic
             // or its methods are explicit interface implementations.
             if (import.ImportingMember is FieldInfo)
             {
-                this.WriteLine("var {0} = ({3}){1}.GetValue({2});", import.ImportingMember.Name, GetFieldInfoExpression((FieldInfo)import.ImportingMember), InstantiatedPartLocalVarName, importManyLocalVarTypeName);
+                this.WriteLine("var {0} = ({3}){1}.GetValue({2});", tempVarName, GetFieldInfoExpression((FieldInfo)import.ImportingMember), InstantiatedPartLocalVarName, importManyLocalVarTypeName);
             }
             else
             {
-                this.WriteLine("var {0} = ({3}){1}.Invoke({2}, new object[0]);", import.ImportingMember.Name, GetMethodInfoExpression(((PropertyInfo)import.ImportingMember).GetGetMethod(true)), InstantiatedPartLocalVarName, importManyLocalVarTypeName);
+                this.WriteLine("var {0} = ({3}){1}.Invoke({2}, new object[0]);", tempVarName, GetMethodInfoExpression(((PropertyInfo)import.ImportingMember).GetGetMethod(true)), InstantiatedPartLocalVarName, importManyLocalVarTypeName);
             }
 
-            this.WriteLine("if ({0} == null)", import.ImportingMember.Name);
+            this.WriteLine("if ({0} == null)", tempVarName);
             using (Indent(withBraces: true))
             {
                 if (PartDiscovery.IsImportManyCollectionTypeCreateable(import))
@@ -286,18 +310,18 @@
                         if (stronglyTypedCollection)
                         {
                             string elementTypeName = GetTypeName(elementType);
-                            this.WriteLine("{0} = new List<{1}>();", import.ImportingMember.Name, elementTypeName);
+                            this.WriteLine("{0} = new List<{1}>();", tempVarName, elementTypeName);
                         }
                         else
                         {
-                            this.Write("{0} = ", import.ImportingMember.Name);
+                            this.Write("{0} = ", tempVarName);
                             EmitConstructorInvocationExpression(typeof(List<>).MakeGenericType(elementType).GetConstructor(new Type[0]), alwaysUseReflection: true, skipCast: true).Dispose();
                             this.WriteLine(";");
                         }
                     }
                     else
                     {
-                        this.Write("{0} = ({1})(", import.ImportingMember.Name, importManyLocalVarTypeName);
+                        this.Write("{0} = ({1})(", tempVarName, importManyLocalVarTypeName);
                         using (this.EmitConstructorInvocationExpression(import.ImportingSiteType.GetConstructor(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, new Type[0], null)))
                         {
                             // no arguments to constructor
@@ -308,11 +332,11 @@
 
                     if (import.ImportingMember is FieldInfo)
                     {
-                        this.WriteLine("{0}.SetValue({1}, {2});", GetFieldInfoExpression((FieldInfo)import.ImportingMember), InstantiatedPartLocalVarName, import.ImportingMember.Name);
+                        this.WriteLine("{0}.SetValue({1}, {2});", GetFieldInfoExpression((FieldInfo)import.ImportingMember), InstantiatedPartLocalVarName, tempVarName);
                     }
                     else
                     {
-                        this.WriteLine("{0}.Invoke({1}, new object[] {{ {2} }});", GetMethodInfoExpression(((PropertyInfo)import.ImportingMember).GetSetMethod(true)), InstantiatedPartLocalVarName, import.ImportingMember.Name);
+                        this.WriteLine("{0}.Invoke({1}, new object[] {{ {2} }});", GetMethodInfoExpression(((PropertyInfo)import.ImportingMember).GetSetMethod(true)), InstantiatedPartLocalVarName, tempVarName);
                     }
                 }
                 else
@@ -329,14 +353,14 @@
             {
                 if (stronglyTypedCollection)
                 {
-                    this.WriteLine("{0}.Clear();", import.ImportingMember.Name);
+                    this.WriteLine("{0}.Clear();", tempVarName);
                 }
                 else
                 {
                     this.WriteLine(
                         "{0}.Invoke({1}, new object[0]);",
                         GetMethodInfoExpression(icollectionType.GetMethod("Clear")),
-                        import.ImportingMember.Name);
+                        tempVarName);
                 }
             }
 
@@ -344,25 +368,27 @@
 
             foreach (var export in exports)
             {
-                var valueWriter = new StringWriter();
-                EmitValueFactory(import, export, valueWriter);
                 if (stronglyTypedCollection)
                 {
-                    this.WriteLine("{0}.Add({1});", import.ImportingMember.Name, valueWriter);
+                    this.WriteLine("{0}.Add({1});", tempVarName, this.GetValueFactoryExpression(import, export));
                 }
                 else
                 {
                     this.WriteLine(
                         "{0}.Invoke({1}, new object[] {{ {2} }});",
                         GetMethodInfoExpression(icollectionType.GetMethod("Add")),
-                        import.ImportingMember.Name,
-                        valueWriter);
+                        tempVarName,
+                        this.GetValueFactoryExpression(import, export));
                 }
             }
+
+            return string.Format(CultureInfo.InvariantCulture, "({0}){1}", GetTypeName(import.ImportingSiteType), tempVarName);
         }
 
-        private void EmitValueFactory(ImportDefinitionBinding import, ExportDefinitionBinding export, StringWriter writer)
+        private string GetValueFactoryExpression(ImportDefinitionBinding import, ExportDefinitionBinding export)
         {
+            var writer = new StringWriter();
+
             using (this.ValueFactoryWrapper(import, export, writer))
             {
                 if (export.PartDefinition.Type.IsEquivalentTo(import.ComposablePartType) && !import.IsExportFactory)
@@ -424,88 +450,179 @@
                     }
                 }
             }
+
+            return writer.ToString();
         }
 
-        private string GetExportMetadata(ExportDefinitionBinding export)
+        private ExpressionSyntax GetExportMetadata(ExportDefinitionBinding export)
         {
-            var builder = new StringBuilder();
-            builder.Append("new Dictionary<string, object> {");
-            foreach (var metadatum in export.ExportDefinition.Metadata)
-            {
-                builder.AppendFormat(" {{ \"{0}\", {1} }}, ", metadatum.Key, GetExportMetadataValueExpression(metadatum.Value));
-            }
-            builder.Append("}.ToImmutableDictionary()");
-            return builder.ToString();
+            return this.GetSyntaxToReconstructValue(export.ExportDefinition.Metadata);
         }
 
-        private string GetExportMetadataValueExpression(object value)
+        private ExpressionSyntax GetSyntaxToReconstructValue<TKey, TValue>(IReadOnlyDictionary<TKey, TValue> value)
         {
             if (value == null)
             {
-                return "null";
+                return GetSyntaxToReconstructValue((object)null);
+            }
+
+            return SyntaxFactory.InvocationExpression(
+             SyntaxFactory.MemberAccessExpression(
+                 SyntaxKind.SimpleMemberAccessExpression,
+                 SyntaxFactory.ObjectCreationExpression(
+                     SyntaxFactory.GenericName("Dictionary")
+                         .WithTypeArgumentList(
+                             SyntaxFactory.TypeArgumentList(CodeGen.JoinSyntaxNodes<TypeSyntax>(
+                                 SyntaxKind.CommaToken,
+                                 GetTypeNameSyntax(typeof(TKey)),
+                                 GetTypeNameSyntax(typeof(TValue))))))
+                     .WithNewKeywordTrivia()
+                     .WithInitializer(
+                         SyntaxFactory.InitializerExpression(
+                             SyntaxKind.CollectionInitializerExpression,
+                             CodeGen.JoinSyntaxNodes<ExpressionSyntax>(
+                                 SyntaxKind.CommaToken,
+                                 value.Select(kv => SyntaxFactory.InitializerExpression(
+                                     SyntaxKind.ComplexElementInitializerExpression,
+                                     SyntaxFactory.SeparatedList<ExpressionSyntax>(new SyntaxNodeOrToken[] { 
+                                            GetSyntaxToReconstructValue(kv.Key),
+                                            SyntaxFactory.Token(SyntaxKind.CommaToken),
+                                            GetSyntaxToReconstructValue(kv.Value),
+                                        }))).ToArray()))),
+                 SyntaxFactory.IdentifierName("ToImmutableDictionary")));
+        }
+
+        private ExpressionSyntax GetSyntaxToReconstructValue(object value)
+        {
+            if (value == null)
+            {
+                return SyntaxFactory.LiteralExpression(SyntaxKind.NullLiteralExpression);
             }
 
             Type valueType = value.GetType();
             if (value is string)
             {
-                return "\"" + value + "\"";
+                return SyntaxFactory.LiteralExpression(SyntaxKind.StringLiteralExpression, SyntaxFactory.Literal((string)value));
             }
             else if (typeof(char).IsEquivalentTo(valueType))
             {
-                return string.Format(
-                    CultureInfo.InvariantCulture,
-                    "'{0}'",
-                    (char)value == '\'' ? "\\'" : value);
+                return SyntaxFactory.LiteralExpression(SyntaxKind.CharacterLiteralExpression, SyntaxFactory.Literal((char)value));
             }
             else if (typeof(bool).IsEquivalentTo(valueType))
             {
-                return (bool)value ? "true" : "false";
+                return (bool)value
+                    ? SyntaxFactory.LiteralExpression(SyntaxKind.TrueLiteralExpression)
+                    : SyntaxFactory.LiteralExpression(SyntaxKind.FalseLiteralExpression);
+            }
+            else if (valueType.IsEquivalentTo(typeof(double)) && (double)value == double.MaxValue)
+            {
+                return SyntaxFactory.MemberAccessExpression(
+                    SyntaxKind.SimpleMemberAccessExpression,
+                    SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.DoubleKeyword)),
+                    SyntaxFactory.IdentifierName("MaxValue"));
+            }
+            else if (valueType.IsEquivalentTo(typeof(double)) && (double)value == double.MinValue)
+            {
+                return SyntaxFactory.MemberAccessExpression(
+                    SyntaxKind.SimpleMemberAccessExpression,
+                    SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.DoubleKeyword)),
+                    SyntaxFactory.IdentifierName("MinValue"));
+            }
+            else if (valueType.IsEquivalentTo(typeof(float)) && (float)value == float.MaxValue)
+            {
+                return SyntaxFactory.MemberAccessExpression(
+                    SyntaxKind.SimpleMemberAccessExpression,
+                    SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.FloatKeyword)),
+                    SyntaxFactory.IdentifierName("MaxValue"));
+            }
+            else if (valueType.IsEquivalentTo(typeof(float)) && (float)value == float.MinValue)
+            {
+                return SyntaxFactory.MemberAccessExpression(
+                    SyntaxKind.SimpleMemberAccessExpression,
+                    SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.FloatKeyword)),
+                    SyntaxFactory.IdentifierName("MinValue"));
             }
             else if (valueType.IsPrimitive)
             {
-                return string.Format(CultureInfo.InvariantCulture, "({0})({1})", GetTypeName(valueType), value);
+                return SyntaxFactory.CastExpression(
+                    SyntaxFactory.ParseTypeName(GetTypeName(valueType)),
+                    SyntaxFactory.ParenthesizedExpression(SyntaxFactory.ParseExpression(value.ToString())));
             }
             else if (valueType.IsEquivalentTo(typeof(Guid)))
             {
-                return string.Format(CultureInfo.InvariantCulture, "Guid.Parse(\"{0}\")", value);
+                return SyntaxFactory.InvocationExpression(
+                    SyntaxFactory.MemberAccessExpression(
+                        SyntaxKind.SimpleMemberAccessExpression,
+                        SyntaxFactory.IdentifierName("Guid"),
+                        SyntaxFactory.IdentifierName("Parse")),
+                    SyntaxFactory.ArgumentList(
+                        SyntaxFactory.SingletonSeparatedList(
+                            SyntaxFactory.Argument(
+                                SyntaxFactory.LiteralExpression(SyntaxKind.StringLiteralExpression, SyntaxFactory.Literal(((Guid)value).ToString()))))));
             }
             else if (valueType.IsEnum)
             {
-                return string.Format(
-                    CultureInfo.InvariantCulture,
-                    "({0}){1}",
-                    GetTypeName(valueType),
-                    Convert.ChangeType(value, Enum.GetUnderlyingType(valueType)));
+                ExpressionSyntax underlyingTypeValue = GetSyntaxToReconstructValue(Convert.ChangeType(value, Enum.GetUnderlyingType(valueType)));
+                if (IsPublic(valueType, true))
+                {
+                    return SyntaxFactory.CastExpression(GetTypeNameSyntax(valueType), underlyingTypeValue);
+                }
+                else
+                {
+                    return SyntaxFactory.InvocationExpression(
+                        SyntaxFactory.MemberAccessExpression(
+                            SyntaxKind.SimpleMemberAccessExpression,
+                            SyntaxFactory.IdentifierName("Enum"),
+                            SyntaxFactory.IdentifierName("ToObject")),
+                        SyntaxFactory.ArgumentList(CodeGen.JoinSyntaxNodes<ArgumentSyntax>(
+                            SyntaxKind.CommaToken,
+                            SyntaxFactory.Argument(GetTypeExpressionSyntax(valueType)),
+                            SyntaxFactory.Argument(underlyingTypeValue))));
+                }
             }
             else if (typeof(Type).IsAssignableFrom(valueType))
             {
-                return string.Format(
-                    CultureInfo.InvariantCulture,
-                    "({1})typeof({0})",
-                    GetTypeName((Type)value),
-                    GetTypeName(valueType));
+                // assumeNonPublic=true because typeof() would result in the JIT compiler
+                // loading the assembly containing the type itself even before this
+                // part is activated.
+                return SyntaxFactory.CastExpression(
+                    GetTypeNameSyntax(valueType), // Cast as TypeInfo to avoid some compilation errors.
+                    SyntaxFactory.ParseExpression(GetTypeExpression((Type)value, assumeNonPublic: true)));
             }
             else if (valueType.IsArray)
             {
-                var builder = new StringBuilder();
-                builder.AppendFormat("new {0}[] {{ ", GetTypeName(valueType.GetElementType()));
-                bool firstValue = true;
-                foreach (object element in (Array)value)
-                {
-                    if (!firstValue)
-                    {
-                        builder.Append(", ");
-                    }
-
-                    builder.Append(GetExportMetadataValueExpression(element));
-                    firstValue = false;
-                }
-
-                builder.Append("}");
-                return builder.ToString();
+                var array = (Array)value;
+                return SyntaxFactory.ArrayCreationExpression(
+                    SyntaxFactory.ArrayType(GetTypeNameSyntax(valueType.GetElementType()))
+                        .WithRankSpecifiers(
+                            SyntaxFactory.SingletonList(
+                            SyntaxFactory.ArrayRankSpecifier(
+                                SyntaxFactory.SingletonSeparatedList<ExpressionSyntax>(
+                                    SyntaxFactory.OmittedArraySizeExpression())))),
+                    SyntaxFactory.InitializerExpression(
+                        SyntaxKind.ArrayInitializerExpression,
+                        SyntaxFactory.SeparatedList<ExpressionSyntax>(
+                            array.Cast<object>().Select(GetSyntaxToReconstructValue))))
+                    .WithNewKeywordTrivia();
             }
 
             throw new NotSupportedException();
+        }
+
+        private TypeSyntax GetTypeNameSyntax(Type type, bool genericTypeDefinition = false, bool evenNonPublic = false)
+        {
+            Requires.NotNull(type, "type");
+
+            if (type.IsEquivalentTo(typeof(string)))
+            {
+                return SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.StringKeyword));
+            }
+            else if (type.IsEquivalentTo(typeof(object)))
+            {
+                return SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.ObjectKeyword));
+            }
+
+            return SyntaxFactory.ParseTypeName(this.GetTypeName(type, genericTypeDefinition, evenNonPublic));
         }
 
         private IDisposable EmitConstructorInvocationExpression(ComposablePartDefinition partDefinition)
@@ -514,14 +631,15 @@
             return this.EmitConstructorInvocationExpression(partDefinition.ImportingConstructorInfo);
         }
 
-        private IDisposable EmitConstructorInvocationExpression(ConstructorInfo ctor, bool alwaysUseReflection = false, bool skipCast = false)
+        private IDisposable EmitConstructorInvocationExpression(ConstructorInfo ctor, bool alwaysUseReflection = false, bool skipCast = false, TextWriter writer = null)
         {
             Requires.NotNull(ctor, "ctor");
 
+            writer = writer ?? new SelfTextWriter(this);
             bool publicCtor = !alwaysUseReflection && IsPublic(ctor, ctor.DeclaringType);
             if (publicCtor)
             {
-                this.Write("new {0}(", GetTypeName(ctor.DeclaringType));
+                writer.Write("new {0}(", GetTypeName(ctor.DeclaringType));
             }
             else
             {
@@ -547,55 +665,56 @@
                         GetTypeName(ctor.DeclaringType, evenNonPublic: true) + "." + ctor.Name);
                 }
 
-                this.Write("({0})({1}).Invoke(new object[] {{", (skipCast || !IsPublic(ctor.DeclaringType, true)) ? "object" : GetTypeName(ctor.DeclaringType), ctorExpression);
+                writer.Write("({0})({1}).Invoke(new object[] {{", skipCast ? "object" : GetTypeName(ctor.DeclaringType), ctorExpression);
             }
-            var indent = this.Indent();
+            var indent = this.Indent(writer: writer);
 
             return new DisposableWithAction(delegate
             {
                 indent.Dispose();
                 if (publicCtor)
                 {
-                    this.Write(")");
+                    writer.Write(")");
                 }
                 else
                 {
-                    this.Write(" })");
+                    writer.Write(" })");
                 }
             });
         }
 
         private void EmitInstantiatePart(ComposedPart part)
         {
+            localSymbols.Clear();
+
             if (!part.Definition.IsInstantiable)
             {
                 this.WriteLine("return CannotInstantiatePartWithNoImportingConstructor();");
                 return;
             }
 
-            this.Write("var {0} = ", InstantiatedPartLocalVarName);
-            using (this.EmitConstructorInvocationExpression(part.Definition))
+            this.WriteLine("{0} {1};", GetTypeName(part.Definition.Type), InstantiatedPartLocalVarName);
+            using (Indent(withBraces: true))
             {
-                if (part.Definition.ImportingConstructor.Count > 0)
+                int importingConstructorArgIndex = 0;
+                var importingConstructorArgNames = new string[part.Definition.ImportingConstructor.Count];
+                foreach (var pair in part.GetImportingConstructorImports())
                 {
-                    this.WriteLine(string.Empty);
-                    bool first = true;
-                    foreach (var import in part.GetImportingConstructorImports())
-                    {
-                        if (!first)
-                        {
-                            this.WriteLine(",");
-                        }
-
-                        var expressionWriter = new StringWriter();
-                        this.EmitImportSatisfyingExpression(import.Key, import.Value, expressionWriter);
-                        this.Write(expressionWriter.ToString());
-                        first = false;
-                    }
+                    this.WriteLine(
+                        "var {0} = {1};",
+                        importingConstructorArgNames[importingConstructorArgIndex++] = ReserveLocalVarName("arg"),
+                        this.GetImportSatisfyingExpression(pair.Key, pair.Value));
                 }
+
+                this.Write("{0} = ", InstantiatedPartLocalVarName);
+                using (this.EmitConstructorInvocationExpression(part.Definition))
+                {
+                    this.Write(string.Join(", ", importingConstructorArgNames));
+                }
+
+                this.WriteLine(";");
             }
 
-            this.WriteLine(";");
             if (typeof(IDisposable).IsAssignableFrom(part.Definition.Type))
             {
                 this.WriteLine("this.TrackDisposableValue((IDisposable){0});", InstantiatedPartLocalVarName);
@@ -650,7 +769,7 @@
             bool closeParenthesis = false;
             if (import.IsLazyConcreteType || (export.ExportingMember != null && import.IsLazy))
             {
-                if (IsPublic(export.ExportedValueType) && export.ExportedValueType.IsEquivalentTo(import.ImportingSiteElementType))
+                if (IsPublic(import.ImportingSiteTypeWithoutCollection, true) && export.ExportedValueType.IsEquivalentTo(import.ImportingSiteElementType))
                 {
                     string lazyTypeName = GetTypeName(LazyPart.FromLazy(import.ImportingSiteTypeWithoutCollection));
                     if (import.MetadataType == null && export.ExportedValueType.IsEquivalentTo(export.PartDefinition.Type) && import.ComposablePartType != export.PartDefinition.Type)
@@ -844,9 +963,10 @@
                     {
                         foreach (var export in exports)
                         {
-                            var valueWriter = new StringWriter();
-                            EmitValueFactory(synthesizedImport, export, valueWriter);
-                            this.WriteLine("new Export(importDefinition.ContractName, {1}, () => ({0}).Value),", valueWriter, GetExportMetadata(export));
+                            this.WriteLine(
+                                "new Export(importDefinition.ContractName, {1}, () => ({0}).Value),",
+                                this.GetValueFactoryExpression(synthesizedImport, export),
+                                GetExportMetadata(export));
                         }
                     }
 
@@ -861,15 +981,23 @@
             if (import.MetadataType != null)
             {
                 writer.Write(", ");
-                if (import.MetadataType != typeof(IDictionary<string, object>))
+
+                if (import.MetadataType == typeof(IDictionary<string, object>))
+                {
+                    writer.Write(GetExportMetadata(export));
+                }
+                else if (import.MetadataType.IsInterface)
                 {
                     writer.Write("new {0}(", GetClassNameForMetadataView(import.MetadataType));
-                }
-
-                writer.Write(GetExportMetadata(export));
-                if (import.MetadataType != typeof(IDictionary<string, object>))
-                {
+                    writer.Write(GetExportMetadata(export));
                     writer.Write(")");
+                }
+                else
+                {
+                    using (EmitConstructorInvocationExpression(import.MetadataType.GetConstructor(new Type[] { typeof(IDictionary<string, object>) }), writer: writer))
+                    {
+                        writer.Write(GetExportMetadata(export));
+                    }
                 }
             }
         }
@@ -898,47 +1026,53 @@
             return ReflectionHelpers.GetTypeName(type, genericTypeDefinition, evenNonPublic, this.relevantAssemblies, this.relevantEmbeddedTypes);
         }
 
-        /// <summary>
-        /// Gets a C# expression that evaluates to a System.Type instance for the specified type.
-        /// </summary>
-        private string GetTypeExpression(Type type, bool genericTypeDefinition = false)
+        private ExpressionSyntax GetTypeExpressionSyntax(Type type, bool genericTypeDefinition = false, bool assumeNonPublic = false)
         {
             Requires.NotNull(type, "type");
 
-            if (IsPublic(type, true))
+            if (!assumeNonPublic && IsPublic(type, true) && !type.IsEmbeddedType()) // embedded types need to be matched to their receiving assembly
             {
-                return string.Format(
-                    CultureInfo.InvariantCulture,
-                    "typeof({0})",
-                    this.GetTypeName(type, genericTypeDefinition));
+                return SyntaxFactory.TypeOfExpression(this.GetTypeNameSyntax(type, genericTypeDefinition));
             }
             else
             {
                 var targetType = (genericTypeDefinition && type.IsGenericType) ? type.GetGenericTypeDefinition() : type;
-                var expression = new StringBuilder();
-                expression.AppendFormat(
-                    CultureInfo.InvariantCulture,
-                    "Type.GetType({0})",
-                    Quote(targetType.AssemblyQualifiedName));
+                var typeExpression = SyntaxFactory.InvocationExpression(
+                    SyntaxFactory.MemberAccessExpression(
+                        SyntaxKind.SimpleMemberAccessExpression,
+                        SyntaxFactory.IdentifierName("Type"),
+                        SyntaxFactory.IdentifierName("GetType")),
+                    SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList<ArgumentSyntax>(
+                        SyntaxFactory.Argument(SyntaxFactory.LiteralExpression(SyntaxKind.StringLiteralExpression, SyntaxFactory.Literal(targetType.AssemblyQualifiedName))))));
+
                 if (!genericTypeDefinition && targetType.IsGenericTypeDefinition)
                 {
                     // Concatenate on the generic type arguments if the caller didn't explicitly want the generic type definition.
                     // Note that the type itself may be a generic type definition, in which case the concatenated types might be
                     // T1, T2. That's fine. In fact that's what we want because it causes the types from the caller's caller to
                     // propagate.
-                    expression.Append(".MakeGenericType(");
-                    foreach (Type typeArg in targetType.GetGenericArguments())
-                    {
-                        expression.Append(this.GetTypeExpression(typeArg, false));
-                        expression.Append(", ");
-                    }
-
-                    expression.Length -= 2;
-                    expression.Append(")");
+                    var constructedTypeExpression = SyntaxFactory.InvocationExpression(
+                        SyntaxFactory.MemberAccessExpression(
+                            SyntaxKind.SimpleMemberAccessExpression,
+                            typeExpression,
+                            SyntaxFactory.IdentifierName("MakeGenericType")),
+                        SyntaxFactory.ArgumentList(CodeGen.JoinSyntaxNodes<ArgumentSyntax>(
+                            SyntaxKind.CommaToken,
+                            targetType.GetGenericArguments().Select(arg => SyntaxFactory.Argument(this.GetTypeExpressionSyntax(arg, false))).ToArray())));
+                    return constructedTypeExpression;
                 }
 
-                return expression.ToString();
+                return typeExpression;
             }
+        }
+
+        /// <summary>
+        /// Gets a C# expression that evaluates to a System.Type instance for the specified type.
+        /// </summary>
+        private string GetTypeExpression(Type type, bool genericTypeDefinition = false, bool assumeNonPublic = false)
+        {
+            return this.GetTypeExpressionSyntax(type, genericTypeDefinition, assumeNonPublic)
+                .NormalizeWhitespace().ToString();
         }
 
         private static bool IsPublic(Type type, bool checkGenericTypeArgs = false)
@@ -950,12 +1084,9 @@
         {
             Requires.NotNull(metadataView, "metadataView");
 
-            if (metadataView.IsInterface)
-            {
-                return "ClassFor" + metadataView.Name;
-            }
-
-            return this.GetTypeName(metadataView);
+            return ReserveClassSymbolName(
+                metadataView.IsInterface ? "ClassFor" + metadataView.Name : this.GetTypeName(metadataView),
+                metadataView);
         }
 
         private string GetValueOrDefaultForMetadataView(PropertyInfo property, string sourceVarName)
@@ -969,7 +1100,7 @@
                     this.GetTypeName(property.PropertyType),
                     sourceVarName,
                     property.Name,
-                    GetExportMetadataValueExpression(defaultValueAttribute.Value),
+                    GetSyntaxToReconstructValue(defaultValueAttribute.Value),
                     property.PropertyType.IsValueType ? string.Empty : (" as " + this.GetTypeName(property.PropertyType)));
             }
             else
@@ -1161,13 +1292,14 @@
                 case MemberTypes.Constructor:
                     return ((ConstructorInfo)memberInfo).IsPublic;
                 case MemberTypes.Field:
-                    return ((FieldInfo)memberInfo).IsPublic;
+                    var fieldInfo = (FieldInfo)memberInfo;
+                    return fieldInfo.IsPublic && IsPublic(fieldInfo.FieldType, true); // we have to check the type in case it contains embedded generic type arguments
                 case MemberTypes.Method:
                     return ((MethodInfo)memberInfo).IsPublic;
                 case MemberTypes.Property:
                     var property = (PropertyInfo)memberInfo;
                     var method = setter ? property.GetSetMethod(true) : property.GetGetMethod(true);
-                    return IsPublic(method, reflectedType);
+                    return IsPublic(method, reflectedType) && IsPublic(property.PropertyType, true); // we have to check the type in case it contains embedded generic type arguments
                 default:
                     throw new NotSupportedException();
             }
@@ -1176,7 +1308,10 @@
         private LazyConstructionResult EmitLazyConstruction(Type valueType, Type metadataType, TextWriter writer = null)
         {
             writer = writer ?? new SelfTextWriter(this);
-            if (IsPublic(valueType, true) && (metadataType == null || IsPublic(metadataType, true)))
+            Type lazyTypeDefinition = metadataType != null ? typeof(LazyPart<,>) : typeof(LazyPart<>);
+            Type[] lazyTypeArgs = metadataType != null ? new[] { valueType, metadataType } : new[] { valueType };
+            Type lazyType = lazyTypeDefinition.MakeGenericType(lazyTypeArgs);
+            if (IsPublic(lazyType, true))
             {
                 writer.Write("new LazyPart<{0}", GetTypeName(valueType));
                 if (metadataType != null)
@@ -1192,14 +1327,12 @@
             }
             else
             {
-                Type lazyType = metadataType != null ? typeof(LazyPart<,>) : typeof(LazyPart<>);
-                Type[] lazyTypeArgs = metadataType != null ? new[] { valueType, metadataType } : new[] { valueType };
-                var ctor = lazyType.GetConstructors().Single(c => c.GetParameters()[0].ParameterType.Equals(typeof(Func<object>)));
+                var ctor = lazyTypeDefinition.GetConstructors().Single(c => c.GetParameters()[0].ParameterType.Equals(typeof(Func<object>)));
                 writer.WriteLine(
                     "((ILazy<{4}>)((ConstructorInfo)MethodInfo.GetMethodFromHandle({0}.ManifestModule.ResolveMethod({1}/*{3}*/).MethodHandle, {2})).Invoke(new object[] {{ (Func<object>)(() => ",
-                    GetAssemblyExpression(lazyType.Assembly),
+                    GetAssemblyExpression(lazyTypeDefinition.Assembly),
                     ctor.MetadataToken,
-                    this.GetClosedGenericTypeHandleExpression(lazyType.MakeGenericType(lazyTypeArgs)),
+                    this.GetClosedGenericTypeHandleExpression(lazyType),
                     GetTypeName(ctor.DeclaringType, evenNonPublic: true) + "." + ctor.Name,
                     GetTypeName(valueType) + (metadataType != null ? (", " + GetTypeName(metadataType)) : ""));
                 var indent = Indent();
@@ -1300,21 +1433,90 @@
                 this.GetTypeExpression(constructedType));
         }
 
-        private IDisposable Indent(int count = 1, bool withBraces = false)
+        private string ReserveLocalVarName(string desiredName)
         {
-            if (withBraces)
+            if (this.localSymbols.Add(desiredName))
             {
-                this.WriteLine("{");
+                return desiredName;
             }
 
-            this.PushIndent(new string(' ', count * 4));
+            int i = 0;
+            string candidateName;
+            do
+            {
+                i++;
+                candidateName = desiredName + "_" + i.ToString(CultureInfo.InvariantCulture);
+            } while (!this.localSymbols.Add(candidateName));
+
+            return candidateName;
+        }
+
+        private string ReserveClassSymbolName(string shortName, object namedValue)
+        {
+            string result;
+            if (this.reservedSymbols.TryGetValue(namedValue, out result))
+            {
+                return result;
+            }
+
+            if (this.classSymbols.Add(shortName))
+            {
+                result = shortName;
+            }
+            else
+            {
+                int i = 0;
+                string candidateName;
+                do
+                {
+                    i++;
+                    candidateName = shortName + "_" + i.ToString(CultureInfo.InvariantCulture);
+                } while (!this.classSymbols.Add(candidateName));
+
+                result = candidateName;
+            }
+
+            this.reservedSymbols.Add(namedValue, result);
+            return result;
+        }
+
+        private IDisposable Indent(int count = 1, bool withBraces = false, bool noLineFeedAfterClosingBrace = false, TextWriter writer = null)
+        {
+            if (count == 0)
+            {
+                return null;
+            }
+
+            if (count > 1)
+            {
+                // Push all but the last level *before* printing the curly braces.
+                this.PushIndent(new string(' ', (count - 1) * 4));
+            }
+
+            writer = writer ?? new SelfTextWriter(this);
+            if (withBraces)
+            {
+                writer.WriteLine("{");
+            }
+
+            this.PushIndent(new string(' ', 4));
 
             return new DisposableWithAction(delegate
             {
                 this.PopIndent();
                 if (withBraces)
                 {
-                    this.WriteLine("}");
+                    writer.Write("}");
+                    if (!noLineFeedAfterClosingBrace)
+                    {
+                        writer.WriteLine();
+                    }
+                }
+
+                if (count > 1)
+                {
+                    // Pop the extra outer-indent.
+                    this.PopIndent();
                 }
             });
         }
@@ -1341,6 +1543,21 @@
             public override void Write(string value)
             {
                 this.factory.Write(value);
+            }
+
+            public override void WriteLine()
+            {
+                this.factory.WriteLine(string.Empty);
+            }
+
+            public override void WriteLine(string value)
+            {
+                this.factory.WriteLine(value);
+            }
+
+            public override void WriteLine(string format, params object[] arg)
+            {
+                this.factory.WriteLine(format, arg);
             }
         }
 

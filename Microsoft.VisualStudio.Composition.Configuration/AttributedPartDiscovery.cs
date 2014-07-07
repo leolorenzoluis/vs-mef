@@ -69,15 +69,15 @@
 
             foreach (var member in partType.GetProperties(BindingFlags.Instance | this.PublicVsNonPublicFlags))
             {
-                var importAttribute = member.GetCustomAttribute<ImportAttribute>();
-                var importManyAttribute = member.GetCustomAttribute<ImportManyAttribute>();
-                var exportAttributes = member.GetCustomAttributes<ExportAttribute>();
+                var importAttribute = member.GetCustomAttribute<ImportAttribute>(inherit: false);
+                var importManyAttribute = member.GetCustomAttribute<ImportManyAttribute>(inherit: false);
+                var exportAttributes = member.GetCustomAttributes<ExportAttribute>(inherit: false);
                 Requires.Argument(!(importAttribute != null && importManyAttribute != null), "partType", "Member \"{0}\" contains both ImportAttribute and ImportManyAttribute.", member.Name);
                 Requires.Argument(!(exportAttributes.Any() && (importAttribute != null || importManyAttribute != null)), "partType", "Member \"{0}\" contains both import and export attributes.", member.Name);
 
-                var importConstraints = GetImportConstraints(member.GetCustomAttributes<ImportMetadataConstraintAttribute>());
+                var importConstraints = GetImportConstraints(member.GetCustomAttributes<ImportMetadataConstraintAttribute>(inherit: false));
                 ImportDefinition importDefinition;
-                if (TryCreateImportDefinition(member.PropertyType, member.GetCustomAttributes(), importConstraints, out importDefinition))
+                if (TryCreateImportDefinition(member.PropertyType, member.GetCustomAttributes(inherit: false).OfType<Attribute>(), importConstraints, out importDefinition))
                 {
                     imports.Add(new ImportDefinitionBinding(importDefinition, partType, member));
                 }
@@ -150,6 +150,14 @@
             }
 
             return false;
+        }
+
+        protected override IEnumerable<Type> GetTypes(Assembly assembly)
+        {
+            Requires.NotNull(assembly, "assembly");
+
+            return (this.IsNonPublicSupported ? assembly.GetTypes() : assembly.GetExportedTypes())
+                .Where(type => type.GetCustomAttribute<PartNotDiscoverableAttribute>() == null);
         }
 
         private ImmutableDictionary<string, object> GetExportMetadata(IEnumerable<Attribute> attributes)
@@ -278,18 +286,6 @@
                 select new ExportMetadataValueImportConstraint(importConstraint.Name, importConstraint.Value));
 
             return constraints;
-        }
-
-        public override IReadOnlyCollection<ComposablePartDefinition> CreateParts(Assembly assembly)
-        {
-            Requires.NotNull(assembly, "assembly");
-
-            var parts = from type in this.IsNonPublicSupported ? assembly.GetTypes() : assembly.GetExportedTypes()
-                        where type.GetCustomAttribute<PartNotDiscoverableAttribute>() == null
-                        let part = this.CreatePart(type)
-                        where part != null
-                        select part;
-            return parts.ToImmutableList();
         }
     }
 }

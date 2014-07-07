@@ -35,25 +35,25 @@
         }
 
         [Fact]
-        public void AssemblyDiscoveryFindsTopLevelParts()
+        public async Task AssemblyDiscoveryFindsTopLevelParts()
         {
-            var parts = this.DiscoveryService.CreateParts(typeof(NonDiscoverablePart).Assembly);
+            var parts = await this.DiscoveryService.CreatePartsAsync(typeof(NonDiscoverablePart).Assembly);
             Assert.True(parts.Any(p => p.Type.IsEquivalentTo(typeof(DiscoverablePart1))));
             Assert.True(parts.Any(p => p.Type.IsEquivalentTo(typeof(DiscoverablePart2))));
         }
 
         [Fact]
-        public void AssemblyDiscoveryOmitsNonDiscoverableParts()
+        public async Task AssemblyDiscoveryOmitsNonDiscoverableParts()
         {
-            var parts = this.DiscoveryService.CreateParts(typeof(NonDiscoverablePart).Assembly);
+            var parts = await this.DiscoveryService.CreatePartsAsync(typeof(NonDiscoverablePart).Assembly);
             Assert.False(parts.Any(p => p.Type.IsEquivalentTo(typeof(NonPart))));
             Assert.False(parts.Any(p => p.Type.IsEquivalentTo(typeof(NonDiscoverablePart))));
         }
 
         [Fact]
-        public void AssemblyDiscoveryFindsNestedParts()
+        public async Task AssemblyDiscoveryFindsNestedParts()
         {
-            var parts = this.DiscoveryService.CreateParts(typeof(NonDiscoverablePart).Assembly);
+            var parts = await this.DiscoveryService.CreatePartsAsync(typeof(NonDiscoverablePart).Assembly);
             Assert.True(parts.Any(p => p.Type.IsEquivalentTo(typeof(OuterClass.NestedPart))));
         }
 
@@ -64,5 +64,40 @@
         [Export, Shared]
         [MefV1.Export]
         public class SharedPart { }
+
+        #region Indexer overloading tests
+
+        [Fact]
+        public void IndexerInDerivedAndBase()
+        {
+            var part = this.DiscoveryService.CreatePart(typeof(DerivedTypeWithIndexer));
+        }
+
+        public class BaseTypeWithIndexer
+        {
+            public virtual string this[int index]
+            {
+                get { throw new NotImplementedException(); }
+                set { throw new NotImplementedException(); }
+            }
+
+            public virtual string this[string index]
+            {
+                get { throw new NotImplementedException(); }
+                set { throw new NotImplementedException(); }
+            }
+        }
+
+        [Export]
+        public class DerivedTypeWithIndexer : BaseTypeWithIndexer
+        {
+            public override string this[int index]
+            {
+                get { throw new NotImplementedException(); }
+                set { throw new NotImplementedException(); }
+            }
+        }
+
+        #endregion
     }
 }

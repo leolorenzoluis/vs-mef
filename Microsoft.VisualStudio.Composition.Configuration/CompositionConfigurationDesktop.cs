@@ -4,18 +4,15 @@
     using System.Collections.Generic;
     using System.Collections.Immutable;
     using System.Diagnostics;
+    using System.Globalization;
     using System.IO;
     using System.Linq;
     using System.Reflection;
+    using System.Runtime.InteropServices;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
     using System.Xml;
-    using Microsoft.Build.Construction;
-    using Microsoft.Build.Evaluation;
-    using Microsoft.Build.Execution;
-    using Microsoft.Build.Framework;
-    using Microsoft.Build.Logging;
     using Microsoft.CodeAnalysis;
     using Microsoft.CodeAnalysis.CSharp;
     using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -33,7 +30,7 @@
             return CompositionConfiguration.Load(Assembly.LoadFile(defaultCompositionFile));
         }
 
-        public static async Task SaveAsync(this CompositionConfiguration configuration, string assemblyPath, string pdbPath = null, string sourceFilePath = null, CancellationToken cancellationToken = default(CancellationToken))
+        public static async Task SaveAsync(this CompositionConfiguration configuration, string assemblyPath, string pdbPath = null, string sourceFilePath = null, TextWriter buildOutput = null, CancellationToken cancellationToken = default(CancellationToken))
         {
             string assemblyName = Path.GetFileNameWithoutExtension(assemblyPath);
             using (Stream assemblyStream = File.Open(assemblyPath, FileMode.Create))
@@ -47,6 +44,7 @@
                             assemblyStream,
                             pdbStream,
                             sourceFile,
+                            buildOutput,
                             cancellationToken: cancellationToken);
                         if (!result.Success)
                         {
@@ -88,12 +86,28 @@
                     {
                         if (diagnostic.Severity > DiagnosticSeverity.Info)
                         {
+                            string fileName = sourceFile is FileStream ? Path.GetFileName(((FileStream)sourceFile).Name) : assemblyName;
+                            string location = fileName;
                             if (diagnostic.Location != Location.None)
                             {
-                                await buildOutput.WriteAsync("Line " + (diagnostic.Location.GetLineSpan().StartLinePosition.Line + 1) + ": ");
+                                location += string.Format(
+                                    CultureInfo.InvariantCulture,
+                                    "({0},{1},{2},{3})",
+                                    diagnostic.Location.GetLineSpan().StartLinePosition.Line + 1,
+                                    diagnostic.Location.GetLineSpan().StartLinePosition.Character,
+                                    diagnostic.Location.GetLineSpan().EndLinePosition.Line + 1,
+                                    diagnostic.Location.GetLineSpan().EndLinePosition.Character);
                             }
 
-                            await buildOutput.WriteLineAsync(diagnostic.Category + " " + diagnostic.Severity + " " + diagnostic.Id + ": " + diagnostic.GetMessage());
+                            string formattedMessage = string.Format(
+                                CultureInfo.CurrentCulture,
+                                "{0}: {1} {2}: {3}",
+                                location,
+                                diagnostic.Severity,
+                                diagnostic.Id,
+                                diagnostic.GetMessage());
+
+                            await buildOutput.WriteLineAsync(formattedMessage);
                         }
                     }
                 }
@@ -113,13 +127,20 @@
                 typeof(System.Composition.ExportFactory<>).Assembly,
                 typeof(ImmutableDictionary).Assembly);
 
+            var diagnosticOptions = ImmutableDictionary.Create<string, ReportDiagnostic>()
+                .Add("CS1701", ReportDiagnostic.Suppress)  // this is unavoidable. Roslyn doesn't let us supply runtime policy.
+                .Add("CS0618", ReportDiagnostic.Suppress)  // calling obsolete code in generated code is how we roll.
+                .Add("CS0162", ReportDiagnostic.Error);    // dead code emitted can be a sign of defects.
+
             return CSharpCompilation.Create(
                 assemblyName,
                 references: referenceAssemblies.Select(a => MetadataFileReferenceProvider.Default.GetReference(a.Location, MetadataReferenceProperties.Assembly)),
                 options: new CSharpCompilationOptions(
                     OutputKind.DynamicallyLinkedLibrary,
                     optimize: !debug,
-                    debugInformationKind: debug ? DebugInformationKind.Full : DebugInformationKind.None));
+                    debugInformationKind: debug ? DebugInformationKind.Full : DebugInformationKind.None,
+                    assemblyIdentityComparer: DesktopAssemblyIdentityComparer.Default,
+                    specificDiagnosticOptions: diagnosticOptions));
         }
 
         public static async Task<IExportProviderFactory> CreateContainerFactoryAsync(this CompositionConfiguration configuration, Stream sourceFile = null, TextWriter buildOutput = null, CancellationToken cancellationToken = default(CancellationToken))
@@ -159,7 +180,7 @@
                 await writer.WriteAsync(source);
                 await writer.FlushAsync();
                 sourceFile.Position = 0;
-                syntaxTree = SyntaxFactory.ParseSyntaxTree(SourceText.From(sourceFile, encoding), path:  sourceFilePath ?? string.Empty, cancellationToken: cancellationToken);
+                syntaxTree = SyntaxFactory.ParseSyntaxTree(SourceText.From(sourceFile, encoding), path: sourceFilePath ?? string.Empty, cancellationToken: cancellationToken);
             }
             else
             {
@@ -169,9 +190,17 @@
             var assemblies = ImmutableHashSet.Create<Assembly>()
                 .Union(configuration.AdditionalReferenceAssemblies)
                 .Union(templateFactory.RelevantAssemblies);
-            var embeddedInteropAssemblies = CreateEmbeddedInteropAssemblies(templateFactory.RelevantEmbeddedTypes);
+            var embeddedInteropAssemblies = CreateEmbeddedInteropAssemblies(templateFactory.RelevantEmbeddedTypes, assemblies);
+
+            // We don't actually embed interop types on referenced assemblies because if we do, some of our tests fails due to
+            // the CLR's inability to type cast Lazy<NoPIA> objects across assembly boundaries.
+            var embedInteropTypesOptions = MetadataReferenceProperties.Assembly; // new MetadataReferenceProperties(embedInteropTypes: true);
+
             return compilationTemplate
-                .AddReferences(assemblies.Select(r => MetadataFileReferenceProvider.Default.GetReference(r.Location, MetadataReferenceProperties.Assembly)))
+                .AddReferences(assemblies.Select(r =>
+                    MetadataFileReferenceProvider.Default.GetReference(
+                        r.Location,
+                        r.IsEmbeddableAssembly() ? embedInteropTypesOptions : MetadataReferenceProperties.Assembly)))
                 .AddReferences(embeddedInteropAssemblies.Select(r => r.ToMetadataReference(embedInteropTypes: true)))
                 .AddSyntaxTrees(syntaxTree);
         }
@@ -257,8 +286,21 @@
                         .WithModifiers(SyntaxFactory.TokenList(SyntaxFactory.Token(SyntaxKind.PublicKeyword)))));
         }
 
-        private static IEnumerable<CSharpCompilation> CreateEmbeddedInteropAssemblies(IEnumerable<Type> embeddedTypes)
+        private static IEnumerable<CSharpCompilation> CreateEmbeddedInteropAssemblies(IEnumerable<Type> embeddedTypes, IEnumerable<Assembly> referencedAssemblies)
         {
+            Requires.NotNull(embeddedTypes, "embeddedTypes");
+            Requires.NotNull(referencedAssemblies, "referencedAssemblies");
+
+            // Collect a set of all embeddable types from referenced assemblies.
+            var referencedEmbeddableTypes = new HashSet<string>(from assembly in referencedAssemblies
+                                                                where assembly.IsEmbeddableAssembly()
+                                                                from type in assembly.GetExportedTypes()
+                                                                where type.GetCustomAttribute<TypeIdentifierAttribute>() == null // embedded types are not embeddable -- we'll have to synthesize them ourselves
+                                                                select type.FullName);
+
+            embeddedTypes = embeddedTypes.Distinct(EquivalentTypesComparer.Instance)
+                .Where(t => !referencedEmbeddableTypes.Contains(t.FullName));
+
             var sourceFile = CreateTemplateEmbeddableTypesFile()
                 .WithMembers(SyntaxFactory.List<MemberDeclarationSyntax>(embeddedTypes.Select(iface => DefineEmbeddableType(iface))))
                 .NormalizeWhitespace();
@@ -279,6 +321,23 @@
             }
 
             return ImmutableList.Create(compilationUnit);
+        }
+
+        private class EquivalentTypesComparer : IEqualityComparer<Type>
+        {
+            private EquivalentTypesComparer() { }
+
+            internal static readonly EquivalentTypesComparer Instance = new EquivalentTypesComparer();
+
+            public bool Equals(Type x, Type y)
+            {
+                return x.IsEquivalentTo(y);
+            }
+
+            public int GetHashCode(Type obj)
+            {
+                return obj.FullName.GetHashCode();
+            }
         }
     }
 }
