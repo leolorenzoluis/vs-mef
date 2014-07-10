@@ -107,12 +107,14 @@
     <Compile Include="ExportProviderTests.cs" />
     <Compile Include="GenericImportTests.cs" />
     <Compile Include="GuidMetadataTests.cs" />
+    <Compile Include="ImportDefinitionTests.cs" />
     <Compile Include="ImportedExportProviderTests.cs" />
     <Compile Include="InheritedExportTests.cs" />
     <Compile Include="InvalidGraphTests.cs" />
     <Compile Include="MefV1ExportProviderAdapterTests.cs" />
     <Compile Include="MixedGenericExportsTests.cs" />
     <Compile Include="NestedTypeTests.cs" />
+    <Compile Include="NonSharedPartTests.cs" />
     <Compile Include="ObsoleteAttributeTests.cs" />
     <Compile Include="CompositionCatalogTests.cs" />
     <Compile Include="CompositionServiceTests.cs" />
@@ -160,6 +162,7 @@
     <Compile Include="SimpleImportExportTests.cs" />
     <Compile Include="StaticMemberExportsTests.cs" />
     <Compile Include="TestUtilities.cs" />
+    <Compile Include="ThrowingPartsTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

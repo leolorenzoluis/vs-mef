@@ -50,7 +50,7 @@
             }
 
             var filteredExports = from export in exports
-                                  where importDefinition.ExportContraints.All(c => c.IsSatisfiedBy(export.ExportDefinition))
+                                  where importDefinition.ExportConstraints.All(c => c.IsSatisfiedBy(export.ExportDefinition))
                                   select export;
 
             return ImmutableList.CreateRange(filteredExports);
@@ -93,20 +93,6 @@
         public static ComposableCatalog Create(IEnumerable<ComposablePartDefinition> parts)
         {
             return parts.Aggregate(Create(), (catalog, part) => catalog.WithPart(part));
-        }
-
-        public static ComposableCatalog Create(PartDiscovery discovery, IEnumerable<Type> types)
-        {
-            Requires.NotNull(types, "types");
-            Requires.NotNull(discovery, "discovery");
-
-            return Create(types.Select(discovery.CreatePart).Where(p => p != null));
-        }
-
-        public static ComposableCatalog Create(PartDiscovery discovery, params Type[] types)
-        {
-            Requires.NotNull(types, "types");
-            return Create(discovery, (IEnumerable<Type>)types);
         }
 
         public ComposableCatalog WithPart(ComposablePartDefinition partDefinition)

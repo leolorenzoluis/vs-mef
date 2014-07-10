@@ -12,7 +12,7 @@
     using Validation;
     using DefaultMetadataType = System.Collections.Generic.IDictionary<string, object>;
 
-    public abstract class ExportProvider : IDisposable
+    public abstract class ExportProvider : IDisposableObservable
     {
         internal static readonly ExportDefinition ExportProviderExportDefinition = new ExportDefinition(
             ContractNameServices.GetTypeIdentity(typeof(ExportProvider)),
@@ -40,6 +40,8 @@
         /// </summary>
         private readonly HashSet<IDisposable> disposableInstantiatedParts = new HashSet<IDisposable>();
 
+        private bool isDisposed;
+
         protected ExportProvider(ExportProvider parent, string[] freshSharingBoundaries)
         {
             if (parent == null)
@@ -61,6 +63,11 @@
 
             var nonDisposableWrapper = this is ExportProviderAsExport ? this : new ExportProviderAsExport(this, null, null);
             this.NonDisposableWrapper = LazyPart.Wrap(nonDisposableWrapper);
+        }
+
+        bool IDisposableObservable.IsDisposed
+        {
+            get { return this.isDisposed; }
         }
 
         protected ILazy<ExportProvider> NonDisposableWrapper { get; private set; }
@@ -135,21 +142,23 @@
             Type[] genericTypeArguments;
             if (ComposableCatalog.TryGetOpenGenericExport(importDefinition, out genericTypeDefinitionContractName, out genericTypeArguments))
             {
-                var genericTypeImportDefinition = new ImportDefinition(genericTypeDefinitionContractName, importDefinition.Cardinality, importDefinition.Metadata, importDefinition.ExportContraints);
+                var genericTypeImportDefinition = new ImportDefinition(genericTypeDefinitionContractName, importDefinition.Cardinality, importDefinition.Metadata, importDefinition.ExportConstraints);
                 var openGenericExports = this.GetExportsCore(genericTypeImportDefinition);
                 var closedGenericExports = openGenericExports.Select(export => export.CloseGenericExport(genericTypeArguments));
                 exports = exports.Concat(closedGenericExports);
             }
 
             var filteredExports = from export in exports
-                                  where importDefinition.ExportContraints.All(c => c.IsSatisfiedBy(export.Definition))
+                                  where importDefinition.ExportConstraints.All(c => c.IsSatisfiedBy(export.Definition))
                                   select export;
-            if (importDefinition.Cardinality == ImportCardinality.ExactlyOne && filteredExports.Count() != 1)
+
+            var exportsSnapshot = filteredExports.ToArray(); // avoid redoing the above work during multiple enumerations of our result.
+            if (importDefinition.Cardinality == ImportCardinality.ExactlyOne && exportsSnapshot.Length != 1)
             {
                 throw new CompositionFailedException();
             }
 
-            return filteredExports;
+            return exportsSnapshot;
         }
 
         public void Dispose()
@@ -162,6 +171,8 @@
         {
             if (disposing)
             {
+                this.isDisposed = true;
+
                 // Snapshot the contents of the collection within the lock,
                 // then dispose of the values outside the lock to avoid
                 // executing arbitrary 3rd-party code within our lock.
@@ -246,10 +257,11 @@
 
         private IEnumerable<ILazy<T, TMetadataView>> GetExports<T, TMetadataView>(string contractName, ImportCardinality cardinality)
         {
+            Verify.NotDisposed(this);
             contractName = string.IsNullOrEmpty(contractName) ? ContractNameServices.GetTypeIdentity(typeof(T)) : contractName;
 
             var constraints = ImmutableHashSet<IImportSatisfiabilityConstraint>.Empty
-                .Add(new ExportTypeIdentityConstraint(typeof(T)));
+                .Union(PartDiscovery.GetExportTypeIdentityConstraints(typeof(T)));
 
             if (typeof(TMetadataView) != typeof(DefaultMetadataType))
             {
