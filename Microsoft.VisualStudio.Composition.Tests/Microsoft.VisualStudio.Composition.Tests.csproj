@@ -33,6 +33,10 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="ImmutableObjectGraph, Version=1.0.0.0, Culture=neutral, PublicKeyToken=bfd91f1bd601e0d7, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\packages\ImmutableObjectGraph.0.1.0-beta3\lib\portable-net45+win+wp80\ImmutableObjectGraph.dll</HintPath>
+    </Reference>
     <Reference Include="Microsoft.VisualStudio.Language.Intellisense, Version=12.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL" />
     <Reference Include="Microsoft.VisualStudio.Shell.Interop, Version=7.1.40304.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" />
     <Reference Include="Microsoft.VisualStudio.Shell.Interop.11.0, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
@@ -104,6 +108,7 @@
     <Compile Include="DynamicImportTests.cs" />
     <Compile Include="EmbeddableTypesTests.cs" />
     <Compile Include="EmbeddedableTypesMixedTests.cs" />
+    <Compile Include="ExportDefinitionTests.cs" />
     <Compile Include="ExportMetadataViewNameCollisionTests.cs" />
     <Compile Include="ExportProviderTests.cs" />
     <Compile Include="GenericImportTests.cs" />

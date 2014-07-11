@@ -1,0 +1,14 @@
+﻿<#@ template debug="true" language="C#" #>
+<#@ Output Extension=".generated.cs" #>
+<#
+    this.Namespace = "Microsoft.VisualStudio.Composition";
+#>
+<#@ Include File="ImmutableObjectGraph\ImmutableObjectGraph.tt.inc" #>
+<#+
+    class ExportDefinition {
+        [Required]
+        string contractName;
+        [Required]
+        ImmutableDictionary<string, object> Metadata;
+    }
+#>

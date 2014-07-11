@@ -71,7 +71,7 @@
 
                     var exportMetadata = exportMetadataOnType
                         .Add(CompositionConstants.ExportTypeIdentityMetadataName, ContractNameServices.GetTypeIdentity(exportedType));
-                    var exportDefinition = new ExportDefinition(contractName, exportMetadata);
+                    var exportDefinition = ExportDefinition.Create(contractName, exportMetadata);
                     exportsOnType.Add(exportDefinition);
                 }
             }
@@ -104,7 +104,7 @@
                         string contractName = string.IsNullOrEmpty(exportAttribute.ContractName) ? GetContractName(exportedType) : exportAttribute.ContractName;
                         var exportMetadata = exportMetadataOnMember
                             .Add(CompositionConstants.ExportTypeIdentityMetadataName, ContractNameServices.GetTypeIdentity(exportedType));
-                        var exportDefinition = new ExportDefinition(contractName, exportMetadata);
+                        var exportDefinition = ExportDefinition.Create(contractName, exportMetadata);
                         exportDefinitions = exportDefinitions.Add(exportDefinition);
                     }
 
@@ -125,7 +125,7 @@
                         string contractName = string.IsNullOrEmpty(exportAttribute.ContractName) ? GetContractName(exportedType) : exportAttribute.ContractName;
                         var exportMetadata = exportMetadataOnMember
                             .Add(CompositionConstants.ExportTypeIdentityMetadataName, ContractNameServices.GetTypeIdentity(exportedType));
-                        var exportDefinition = new ExportDefinition(contractName, exportMetadata);
+                        var exportDefinition = ExportDefinition.Create(contractName, exportMetadata);
                         exportDefinitions = exportDefinitions.Add(exportDefinition);
                     }
 

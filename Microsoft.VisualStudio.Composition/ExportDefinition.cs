@@ -10,21 +10,8 @@
     using Validation;
 
     [DebuggerDisplay("{ContractName,nq}")]
-    public class ExportDefinition : IEquatable<ExportDefinition>
+    public partial class ExportDefinition : IEquatable<ExportDefinition>
     {
-        public ExportDefinition(string contractName, IReadOnlyDictionary<string, object> metadata)
-        {
-            Requires.NotNullOrEmpty(contractName, "contractName");
-            Requires.NotNull(metadata, "metadata");
-
-            this.ContractName = contractName;
-            this.Metadata = ImmutableDictionary.CreateRange(metadata);
-        }
-
-        public string ContractName { get; private set; }
-
-        public IReadOnlyDictionary<string, object> Metadata { get; private set; }
-
         public override bool Equals(object obj)
         {
             return this.Equals(obj as ExportDefinition);
@@ -39,6 +26,12 @@
         {
             return this.ContractName == other.ContractName
                 && this.Metadata.EqualsByValue(other.Metadata);
+        }
+
+        partial void Validate()
+        {
+            Requires.NotNullOrEmpty(this.ContractName, "ContractName");
+            Requires.NotNull(this.Metadata, "Metadata");
         }
     }
 }

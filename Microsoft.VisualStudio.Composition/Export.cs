@@ -13,8 +13,8 @@
     {
         private readonly ILazy<object> exportedValueGetter;
 
-        public Export(string contractName, IReadOnlyDictionary<string, object> metadata, Func<object> exportedValueGetter)
-            : this(new ExportDefinition(contractName, metadata), new LazyPart<object>(exportedValueGetter))
+        public Export(string contractName, ImmutableDictionary<string, object> metadata, Func<object> exportedValueGetter)
+            : this(ExportDefinition.Create(contractName, metadata), new LazyPart<object>(exportedValueGetter))
         {
         }
 
@@ -61,7 +61,7 @@
             string contractName = this.Definition.ContractName == openGenericExportTypeIdentity
                 ? closedTypeIdentity : this.Definition.ContractName;
 
-            return new Export(new ExportDefinition(contractName, metadata), this.exportedValueGetter);
+            return new Export(ExportDefinition.Create(contractName, metadata), this.exportedValueGetter);
         }
     }
 }

@@ -73,6 +73,10 @@
     <Content Include="$(BinariesSourceLocation)Microsoft.VisualStudio.Composition.dll">
       <Link>build\Microsoft.VisualStudio.Composition.dll</Link>
     </Content>
+    <Content Include="$(BinariesSourceLocation)ImmutableObjectGraph.dll">
+      <Link>build\ImmutableObjectGraph.dll</Link>
+      <AlwaysInclude>true</AlwaysInclude>
+    </Content>
     <Content Include="$(BinariesSourceLocation)System.Collections.Immutable.dll">
       <Link>build\System.Collections.Immutable.dll</Link>
       <AlwaysInclude>true</AlwaysInclude>

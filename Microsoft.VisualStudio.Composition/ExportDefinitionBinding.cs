@@ -105,7 +105,7 @@
             var updatedMetadata = ImmutableDictionary.CreateRange(this.ExportDefinition.Metadata)
                 .SetItem(CompositionConstants.ExportTypeIdentityMetadataName, exportTypeIdentity);
             return new ExportDefinitionBinding(
-                new ExportDefinition(this.ExportDefinition.ContractName, updatedMetadata),
+                ExportDefinition.Create(this.ExportDefinition.ContractName, updatedMetadata),
                 this.PartDefinition,
                 this.ExportingMember);
         }

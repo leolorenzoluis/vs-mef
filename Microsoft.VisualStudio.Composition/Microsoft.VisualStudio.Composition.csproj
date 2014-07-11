@@ -44,6 +44,9 @@
     <DelaySign>true</DelaySign>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="ImmutableObjectGraph">
+      <HintPath>..\packages\ImmutableObjectGraph.0.1.0-beta3\lib\portable-net45+win+wp80\ImmutableObjectGraph.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Collections.Immutable">
       <HintPath>..\packages\Microsoft.Bcl.Immutable.1.1.20-beta\lib\portable-net45+win8\System.Collections.Immutable.dll</HintPath>
@@ -118,15 +121,37 @@
     <Compile Include="ReflectionHelpers.cs" />
     <Compile Include="UniquePropertyNameComparer.cs" />
     <Compile Include="Utilities.cs" />
+    <Compile Include="ExportDefinition.generated.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>ExportDefinition.tt</DependentUpon>
+    </Compile>
   </ItemGroup>
   <ItemGroup>
+    <None Include="app.config" />
     <None Include="packages.config" />
     <None Include="signing.snk" />
+    <None Include="ExportDefinition.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>ExportDefinition.generated.cs</LastGenOutput>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Service Include="{508349B6-6B84-4DF5-91F0-309BEEBAD82D}" />
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <Content Include="ImmutableObjectGraph\ImmutableObjectGraph.Builders.tt.inc" />
+    <Content Include="ImmutableObjectGraph\ImmutableObjectGraph.CollectionHelpers.tt.inc" />
+    <Content Include="ImmutableObjectGraph\ImmutableObjectGraph.DeepMutation.tt.inc" />
+    <Content Include="ImmutableObjectGraph\ImmutableObjectGraph.Delta.tt.inc" />
+    <Content Include="ImmutableObjectGraph\ImmutableObjectGraph.Discovery.tt.inc" />
+    <Content Include="ImmutableObjectGraph\ImmutableObjectGraph.FastSpine.tt.inc" />
+    <Content Include="ImmutableObjectGraph\ImmutableObjectGraph.Interface.tt.inc" />
+    <Content Include="ImmutableObjectGraph\ImmutableObjectGraph.RedNode.tt.inc" />
+    <Content Include="ImmutableObjectGraph\ImmutableObjectGraph.tt.inc" />
+    <Content Include="ImmutableObjectGraph\ImmutableObjectGraph.TypeConversion.tt.inc" />
+    <Content Include="ImmutableObjectGraph\ImmutableObjectGraph.WithProperty.tt.inc" />
+  </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\Portable\$(TargetFrameworkVersion)\Microsoft.Portable.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.

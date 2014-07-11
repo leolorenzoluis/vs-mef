@@ -14,7 +14,7 @@
 
     public abstract class ExportProvider : IDisposableObservable
     {
-        internal static readonly ExportDefinition ExportProviderExportDefinition = new ExportDefinition(
+        internal static readonly ExportDefinition ExportProviderExportDefinition = ExportDefinition.Create(
             ContractNameServices.GetTypeIdentity(typeof(ExportProvider)),
             PartCreationPolicyConstraint.GetExportMetadata(CreationPolicy.Shared).AddRange(ExportTypeIdentityConstraint.GetExportMetadata(typeof(ExportProvider))));
 
