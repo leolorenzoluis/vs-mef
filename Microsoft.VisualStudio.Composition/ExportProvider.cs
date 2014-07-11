@@ -196,7 +196,7 @@
         }
 
         /// <summary>
-        /// When implemented by a derived class, returns an <see cref="IEnumerable&lt;ILazy&lt;T&gt;&gt;"/> of values that
+        /// When implemented by a derived class, returns an <see cref="IEnumerable{T}"/> (where <c>T</c> is <see cref="Export"/>) of values that
         /// satisfy the contract name of the specified <see cref="ImportDefinition"/>.
         /// </summary>
         /// <remarks>

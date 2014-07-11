@@ -20,6 +20,8 @@
     <RestorePackages>true</RestorePackages>
     <ProjectTypeGuids>{786C830F-07A1-408B-BD7F-6EE04809D6DB};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
     <MinimumVisualStudioVersion>11.0</MinimumVisualStudioVersion>
+    <ModuleReferenceAssembly>true</ModuleReferenceAssembly>
+    <PublishMetaAssemblyPath>$(PlatformRefPath)</PublishMetaAssemblyPath>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -64,12 +66,14 @@
     </Reference>
     <Reference Include="System.Core" />
     <Reference Include="System.Threading.Tasks.Dataflow">
-      <HintPath>..\..\CPS\packages\Microsoft.Tpl.Dataflow.4.5.9\lib\portable-net45+win8\System.Threading.Tasks.Dataflow.dll</HintPath>
+      <HintPath>$(DepotRoot)\packages\Microsoft.Tpl.Dataflow.4.5.9\lib\portable-net45+win8\System.Threading.Tasks.Dataflow.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="System.Xml.Linq" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Xml" />
+    <Reference Include="System.Threading.Tasks" />
+    <Reference Include="System.ComponentModel.Composition" Condition=" '$(UsingRazzleToolset)' == 'true' " />
   </ItemGroup>
   <ItemGroup>
     <ModuleReference Include="Microsoft.VisualStudio.Validation" />

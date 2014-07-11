@@ -20,6 +20,7 @@
     using Microsoft.CodeAnalysis.Text;
     using Validation;
 
+    [CLSCompliant(false)]
     public static class CompositionConfigurationDesktop
     {
         public static IExportProviderFactory LoadDefault()
