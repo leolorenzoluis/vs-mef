@@ -5,6 +5,7 @@
     using System.Collections.Immutable;
     using System.IO;
     using System.Linq;
+    using System.Reflection;
     using System.Reflection.Metadata;
     using System.Reflection.PortableExecutable;
     using System.Text;
@@ -33,18 +34,8 @@
                                 let name = metadataReader.GetString(typeDef.Name)
                                 select ns + "." + name;
                 string[] typeNamesArray = typeNames.ToArray();
-                //foreach (var type in metadataReader.TypeDefinitions) { }
-                //var compilation = CSharpCompilation.Create("LMR")
-                //    .AddReferences(referenceProvider.GetReference(assemblyPath, MetadataReferenceProperties.Assembly));
-                //var anything = compilation.GlobalNamespace.GetMembers().FirstOrDefault();
-                //if (anything != null)
-                //{
-                //    return this.CreateParts(anything.ContainingAssembly);
-                //}
-                //else
-                //{
+
                 return ImmutableHashSet<ComposablePartDefinition>.Empty;
-                //}
             }
         }
     }

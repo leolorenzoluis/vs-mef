@@ -14,7 +14,7 @@
         public void LightweightPartDiscovery()
         {
             var discovery = new LightweightPartDiscoveryV1();
-            discovery.CreateParts(File.Open(typeof(string).Assembly.Location, FileMode.Open, FileAccess.Read));
+            discovery.CreateParts(File.Open(typeof(string).Assembly.Location, FileMode.Open, FileAccess.Read, FileShare.Read));
         }
     }
 }
