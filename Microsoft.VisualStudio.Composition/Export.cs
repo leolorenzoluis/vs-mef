@@ -11,14 +11,14 @@
 
     public class Export
     {
-        private readonly Func<object> exportedValueGetter;
+        private readonly ILazy<object> exportedValueGetter;
 
         public Export(string contractName, IReadOnlyDictionary<string, object> metadata, Func<object> exportedValueGetter)
-            : this(new ExportDefinition(contractName, metadata), exportedValueGetter)
+            : this(new ExportDefinition(contractName, metadata), new LazyPart<object>(exportedValueGetter))
         {
         }
 
-        public Export(ExportDefinition definition, Func<object> exportedValueGetter)
+        public Export(ExportDefinition definition, ILazy<object> exportedValueGetter)
         {
             Requires.NotNull(definition, "definition");
             Requires.NotNull(exportedValueGetter, "exportedValueGetter");
@@ -29,21 +29,30 @@
 
         public ExportDefinition Definition { get; private set; }
 
+        /// <summary>
+        /// Gets the metadata on the exported value.
+        /// </summary>
         public IReadOnlyDictionary<string, object> Metadata
         {
             get { return this.Definition.Metadata; }
         }
 
+        /// <summary>
+        /// Gets the exported value.
+        /// </summary>
+        /// <remarks>
+        /// This may incur a value construction cost upon first retrieval.
+        /// </remarks>
         public object Value
         {
-            get { return this.exportedValueGetter(); }
+            get { return this.exportedValueGetter.Value; }
         }
 
         internal Export CloseGenericExport(Type[] genericTypeArguments)
         {
             Requires.NotNull(genericTypeArguments, "genericTypeArguments");
 
-            string openGenericExportTypeIdentity=(string)this.Metadata[CompositionConstants.ExportTypeIdentityMetadataName];
+            string openGenericExportTypeIdentity = (string)this.Metadata[CompositionConstants.ExportTypeIdentityMetadataName];
             string genericTypeDefinitionIdentityPattern = openGenericExportTypeIdentity;
             string[] genericTypeArgumentIdentities = genericTypeArguments.Select(ContractNameServices.GetTypeIdentity).ToArray();
             string closedTypeIdentity = string.Format(CultureInfo.InvariantCulture, genericTypeDefinitionIdentityPattern, genericTypeArgumentIdentities);
@@ -52,7 +61,7 @@
             string contractName = this.Definition.ContractName == openGenericExportTypeIdentity
                 ? closedTypeIdentity : this.Definition.ContractName;
 
-            return new Export(contractName, metadata, this.exportedValueGetter);
+            return new Export(new ExportDefinition(contractName, metadata), this.exportedValueGetter);
         }
     }
 }

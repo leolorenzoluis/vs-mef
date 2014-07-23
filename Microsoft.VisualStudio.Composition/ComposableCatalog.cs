@@ -12,21 +12,29 @@
 
     public class ComposableCatalog
     {
+        /// <summary>
+        /// The types behind the parts in the catalog.
+        /// </summary>
         private ImmutableHashSet<Type> types;
 
+        /// <summary>
+        /// The parts in the catalog.
+        /// </summary>
         private ImmutableHashSet<ComposablePartDefinition> parts;
 
         private ImmutableDictionary<string, ImmutableList<ExportDefinitionBinding>> exportsByContract;
 
-        private ComposableCatalog(ImmutableHashSet<Type> types, ImmutableHashSet<ComposablePartDefinition> parts, ImmutableDictionary<string, ImmutableList<ExportDefinitionBinding>> exportsByContract)
+        private ComposableCatalog(ImmutableHashSet<Type> types, ImmutableHashSet<ComposablePartDefinition> parts, ImmutableDictionary<string, ImmutableList<ExportDefinitionBinding>> exportsByContract, DiscoveredParts discoveredParts)
         {
             Requires.NotNull(types, "types");
             Requires.NotNull(parts, "parts");
             Requires.NotNull(exportsByContract, "exportsByContract");
+            Requires.NotNull(discoveredParts, "discoveredParts");
 
             this.types = types;
             this.parts = parts;
             this.exportsByContract = exportsByContract;
+            this.DiscoveredParts = discoveredParts;
         }
 
         public IReadOnlyList<ExportDefinitionBinding> GetExports(ImportDefinition importDefinition)
@@ -50,7 +58,7 @@
             }
 
             var filteredExports = from export in exports
-                                  where importDefinition.ExportContraints.All(c => c.IsSatisfiedBy(export.ExportDefinition))
+                                  where importDefinition.ExportConstraints.All(c => c.IsSatisfiedBy(export.ExportDefinition))
                                   select export;
 
             return ImmutableList.CreateRange(filteredExports);
@@ -72,41 +80,46 @@
             return false;
         }
 
+        /// <summary>
+        /// Gets the assemblies within which parts are defined.
+        /// </summary>
         public IEnumerable<Assembly> Assemblies
         {
             get { return this.types.Select(t => t.GetTypeInfo().Assembly).Distinct(); }
         }
 
+        /// <summary>
+        /// Gets the set of parts that belong to the catalog.
+        /// </summary>
         public IImmutableSet<ComposablePartDefinition> Parts
         {
             get { return this.parts; }
         }
+
+        /// <summary>
+        /// Gets the parts that were added to the catalog via a <see cref="PartDiscovery"/> class.
+        /// </summary>
+        public DiscoveredParts DiscoveredParts { get; private set; }
 
         public static ComposableCatalog Create()
         {
             return new ComposableCatalog(
                 ImmutableHashSet.Create<Type>(),
                 ImmutableHashSet.Create<ComposablePartDefinition>(),
-                ImmutableDictionary.Create<string, ImmutableList<ExportDefinitionBinding>>());
+                ImmutableDictionary.Create<string, ImmutableList<ExportDefinitionBinding>>(),
+                DiscoveredParts.Empty);
         }
 
         public static ComposableCatalog Create(IEnumerable<ComposablePartDefinition> parts)
         {
-            return parts.Aggregate(Create(), (catalog, part) => catalog.WithPart(part));
+            Requires.NotNull(parts, "parts");
+            return Create().WithParts(parts);
         }
 
-        public static ComposableCatalog Create(PartDiscovery discovery, IEnumerable<Type> types)
+        public static ComposableCatalog Create(DiscoveredParts parts)
         {
-            Requires.NotNull(types, "types");
-            Requires.NotNull(discovery, "discovery");
-
-            return Create(types.Select(discovery.CreatePart).Where(p => p != null));
-        }
-
-        public static ComposableCatalog Create(PartDiscovery discovery, params Type[] types)
-        {
-            Requires.NotNull(types, "types");
-            return Create(discovery, (IEnumerable<Type>)types);
+            Requires.NotNull(parts, "parts");
+            return Create().WithParts(parts);
         }
 
         public ComposableCatalog WithPart(ComposablePartDefinition partDefinition)
@@ -114,7 +127,7 @@
             Requires.NotNull(partDefinition, "partDefinition");
 
             var parts = this.parts.Add(partDefinition);
-            if (parts.SetEquals(this.parts))
+            if (parts == this.parts)
             {
                 // This part is already in the catalog.
                 return this;
@@ -139,7 +152,25 @@
                 }
             }
 
-            return new ComposableCatalog(types, parts, exportsByContract);
+            return new ComposableCatalog(types, parts, exportsByContract, this.DiscoveredParts);
+        }
+
+        public ComposableCatalog WithParts(IEnumerable<ComposablePartDefinition> parts)
+        {
+            Requires.NotNull(parts, "parts");
+
+            // PERF: This has shown up on ETL traces as inefficient and expensive
+            //       WithPart should call WithParts instead, and WithParts should
+            //       execute a more efficient batch operation.
+            return parts.Aggregate(this, (catalog, part) => catalog.WithPart(part));
+        }
+
+        public ComposableCatalog WithParts(DiscoveredParts parts)
+        {
+            Requires.NotNull(parts, "parts");
+
+            var catalog = this.WithParts(parts.Parts);
+            return new ComposableCatalog(catalog.types, catalog.parts, catalog.exportsByContract, catalog.DiscoveredParts.Merge(parts));
         }
     }
 }

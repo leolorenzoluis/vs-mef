@@ -25,6 +25,8 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <DocumentationFile>bin\Debug\Microsoft.VisualStudio.Composition.XML</DocumentationFile>
+    <NoWarn>1591</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -91,13 +93,16 @@
     <Compile Include="CompositionFailedException.cs" />
     <Compile Include="ContractNameServices.cs" />
     <Compile Include="CreationPolicy.cs" />
+    <Compile Include="DelegatingExportProvider.cs" />
     <Compile Include="Dgml.cs" />
+    <Compile Include="DiscoveredParts.cs" />
     <Compile Include="DisposableWithAction.cs" />
     <Compile Include="ExportDefinitionBinding.cs" />
     <Compile Include="ExportFactory.cs" />
     <Compile Include="Export.cs" />
     <Compile Include="ExportTypeIdentityConstraint.cs" />
     <Compile Include="IHasValueAndMetadata.cs" />
+    <Compile Include="IMetadataViewProvider.cs" />
     <Compile Include="ImportMetadataViewConstraint.cs" />
     <Compile Include="ICompositionContainerFactory.cs" />
     <Compile Include="IImportSatisfiabilityConstraint.cs" />

@@ -2,12 +2,15 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.Composition;
+    using System.IO;
     using System.Linq;
+    using System.Reflection;
     using System.Text;
     using System.Threading.Tasks;
     using Microsoft.VisualStudio.Composition.AssemblyDiscoveryTests;
+    using Microsoft.VisualStudio.Composition.BrokenAssemblyTests;
     using Xunit;
-    using System.Composition;
     using MefV1 = System.ComponentModel.Composition;
 
     public abstract class AttributedPartDiscoveryTestBase
@@ -37,24 +40,89 @@
         [Fact]
         public async Task AssemblyDiscoveryFindsTopLevelParts()
         {
-            var parts = await this.DiscoveryService.CreatePartsAsync(typeof(NonDiscoverablePart).Assembly);
-            Assert.True(parts.Any(p => p.Type.IsEquivalentTo(typeof(DiscoverablePart1))));
-            Assert.True(parts.Any(p => p.Type.IsEquivalentTo(typeof(DiscoverablePart2))));
+            var result = await this.DiscoveryService.CreatePartsAsync(typeof(NonDiscoverablePart).Assembly);
+            Assert.True(result.Parts.Any(p => p.Type.IsEquivalentTo(typeof(DiscoverablePart1))));
+            Assert.True(result.Parts.Any(p => p.Type.IsEquivalentTo(typeof(DiscoverablePart2))));
+        }
+
+        [Fact]
+        public void TypeDiscoveryIgnoresPartNotDiscoverableAttribute()
+        {
+            var result = this.DiscoveryService.CreatePart(typeof(NonDiscoverablePart));
+            Assert.NotNull(result);
         }
 
         [Fact]
         public async Task AssemblyDiscoveryOmitsNonDiscoverableParts()
         {
-            var parts = await this.DiscoveryService.CreatePartsAsync(typeof(NonDiscoverablePart).Assembly);
-            Assert.False(parts.Any(p => p.Type.IsEquivalentTo(typeof(NonPart))));
-            Assert.False(parts.Any(p => p.Type.IsEquivalentTo(typeof(NonDiscoverablePart))));
+            var result = await this.DiscoveryService.CreatePartsAsync(typeof(NonDiscoverablePart).Assembly);
+            Assert.False(result.Parts.Any(p => p.Type.IsEquivalentTo(typeof(NonPart))));
+            Assert.False(result.Parts.Any(p => p.Type.IsEquivalentTo(typeof(NonDiscoverablePart))));
+        }
+
+        [Fact]
+        public async Task AssemblyDiscoveryOmitsNonDiscoverableParts_Combined()
+        {
+            var combined = PartDiscovery.Combine(this.DiscoveryService, new PartDiscoveryAllTypesMock());
+            var result = await combined.CreatePartsAsync(typeof(NonDiscoverablePart).Assembly);
+
+            Assert.False(result.Parts.Any(p => p.Type.IsEquivalentTo(typeof(NonPart))));
+            Assert.False(result.Parts.Any(p => p.Type.IsEquivalentTo(typeof(NonDiscoverablePart))));
+            Assert.False(result.Parts.Any(p => p.Type.IsEquivalentTo(typeof(NonDiscoverablePartV1))));
+            Assert.False(result.Parts.Any(p => p.Type.IsEquivalentTo(typeof(NonDiscoverablePartV2))));
+
+            Assert.True(result.Parts.Any(p => p.Type.IsEquivalentTo(typeof(DiscoverablePart1))));
+            Assert.True(result.Parts.Any(p => p.Type.IsEquivalentTo(typeof(DiscoverablePart2))));
         }
 
         [Fact]
         public async Task AssemblyDiscoveryFindsNestedParts()
         {
-            var parts = await this.DiscoveryService.CreatePartsAsync(typeof(NonDiscoverablePart).Assembly);
-            Assert.True(parts.Any(p => p.Type.IsEquivalentTo(typeof(OuterClass.NestedPart))));
+            var result = await this.DiscoveryService.CreatePartsAsync(typeof(NonDiscoverablePart).Assembly);
+            Assert.True(result.Parts.Any(p => p.Type.IsEquivalentTo(typeof(OuterClass.NestedPart))));
+        }
+
+        [SkippableFact]
+        public async Task AssemblyDiscoveryDropsTypesWithProblematicAttributes()
+        {
+            // If this assert fails, it means that the assembly that is supposed to be undiscoverable
+            // by this unit test is actually discoverable. Check that CopyLocal=false for all references
+            // to Microsoft.VisualStudio.Composition.MissingAssemblyTests and that the assembly
+            // is not building to the same directory as the test assemblies.
+            try
+            {
+                typeof(TypeWithMissingAttribute).GetCustomAttributes(false);
+                throw new SkippableFactAttribute.SkipException("The missing assembly is present. Test cannot verify proper operation.");
+            }
+            catch (FileNotFoundException) { }
+
+            var result = await this.DiscoveryService.CreatePartsAsync(typeof(TypeWithMissingAttribute).Assembly);
+
+            // Verify that we still found parts.
+            Assert.NotEqual(0, result.Parts.Count);
+        }
+
+        [SkippableFact]
+        public async Task AssemblyDiscoveryDropsAssembliesWithProblematicTypes()
+        {
+            // If this assert fails, it means that the assembly that is supposed to be undiscoverable
+            // by this unit test is actually discoverable. Check that CopyLocal=false for all references
+            // to Microsoft.VisualStudio.Composition.MissingAssemblyTests and that the assembly
+            // is not building to the same directory as the test assemblies.
+            try
+            {
+                typeof(TypeWithMissingAttribute).GetCustomAttributes(false);
+                throw new SkippableFactAttribute.SkipException("The missing assembly is present. Test cannot verify proper operation.");
+            }
+            catch (FileNotFoundException) { }
+
+            var result = await this.DiscoveryService.CreatePartsAsync(
+                new List<Assembly>{ 
+                    typeof(TypeWithMissingAttribute).Assembly, 
+                    typeof(GoodType).Assembly });
+
+            // Verify that we still found parts.
+            Assert.NotEqual(0, result.Parts.Count);
         }
 
         [Export]
@@ -99,5 +167,26 @@
         }
 
         #endregion
+
+        /// <summary>
+        /// A discovery mock that produces no parts, but includes all types for consideration.
+        /// </summary>
+        private class PartDiscoveryAllTypesMock : PartDiscovery
+        {
+            protected override ComposablePartDefinition CreatePart(Type partType, bool typeExplicitlyRequested)
+            {
+                return null;
+            }
+
+            public override bool IsExportFactoryType(Type type)
+            {
+                return false;
+            }
+
+            protected override IEnumerable<Type> GetTypes(Assembly assembly)
+            {
+                return assembly.GetTypes();
+            }
+        }
     }
 }

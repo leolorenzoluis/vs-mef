@@ -37,9 +37,14 @@
             }
         }
 
-        public override ComposablePartDefinition CreatePart(Type partType)
+        protected override ComposablePartDefinition CreatePart(Type partType, bool typeExplicitlyRequested)
         {
             Requires.NotNull(partType, "partType");
+
+            if (!typeExplicitlyRequested && partType.GetCustomAttribute<PartNotDiscoverableAttribute>() != null)
+            {
+                return null;
+            }
 
             var sharedAttribute = partType.GetCustomAttribute<SharedAttribute>();
             string sharingBoundary = null;
@@ -156,8 +161,7 @@
         {
             Requires.NotNull(assembly, "assembly");
 
-            return (this.IsNonPublicSupported ? assembly.GetTypes() : assembly.GetExportedTypes())
-                .Where(type => type.GetCustomAttribute<PartNotDiscoverableAttribute>() == null);
+            return this.IsNonPublicSupported ? assembly.GetTypes() : assembly.GetExportedTypes();
         }
 
         private ImmutableDictionary<string, object> GetExportMetadata(IEnumerable<Attribute> attributes)
@@ -171,14 +175,14 @@
                 var exportMetadataAttribute = attribute as ExportMetadataAttribute;
                 if (exportMetadataAttribute != null)
                 {
-                    UpdateMetadataDictionary(result, namesOfMetadataWithMultipleValues, exportMetadataAttribute.Name, exportMetadataAttribute.Value);
+                    UpdateMetadataDictionary(result, namesOfMetadataWithMultipleValues, exportMetadataAttribute.Name, exportMetadataAttribute.Value, null);
                 }
                 else if (attribute.GetType().GetCustomAttribute<MetadataAttributeAttribute>() != null)
                 {
                     var properties = attribute.GetType().GetProperties(this.PublicVsNonPublicFlags | BindingFlags.Instance);
                     foreach (var property in properties.Where(p => p.DeclaringType != typeof(Attribute)))
                     {
-                        UpdateMetadataDictionary(result, namesOfMetadataWithMultipleValues, property.Name, property.GetValue(attribute));
+                        UpdateMetadataDictionary(result, namesOfMetadataWithMultipleValues, property.Name, property.GetValue(attribute), property.PropertyType);
                     }
                 }
             }
@@ -186,7 +190,7 @@
             return result.ToImmutable();
         }
 
-        private static void UpdateMetadataDictionary(IDictionary<string, object> result, HashSet<string> namesOfMetadataWithMultipleValues, string name, object value)
+        private static void UpdateMetadataDictionary(IDictionary<string, object> result, HashSet<string> namesOfMetadataWithMultipleValues, string name, object value, Type elementType)
         {
             object priorValue;
             if (result.TryGetValue(name, out priorValue))
@@ -195,10 +199,10 @@
                 {
                     // This is exactly the second metadatum we've observed with this name.
                     // Convert the first value to an element in an array.
-                    priorValue = AddElement(null, priorValue);
+                    priorValue = AddElement(null, priorValue, elementType);
                 }
 
-                result[name] = AddElement((Array)priorValue, value);
+                result[name] = AddElement((Array)priorValue, value, elementType);
             }
             else
             {

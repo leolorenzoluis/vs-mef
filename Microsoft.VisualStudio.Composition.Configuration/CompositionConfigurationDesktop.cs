@@ -30,7 +30,7 @@
             return CompositionConfiguration.Load(Assembly.LoadFile(defaultCompositionFile));
         }
 
-        public static async Task SaveAsync(this CompositionConfiguration configuration, string assemblyPath, string pdbPath = null, string sourceFilePath = null, TextWriter buildOutput = null, CancellationToken cancellationToken = default(CancellationToken))
+        public static async Task SaveAsync(this CompositionConfiguration configuration, string assemblyPath, string pdbPath = null, string sourceFilePath = null, TextWriter buildOutput = null, bool debug = false, CancellationToken cancellationToken = default(CancellationToken))
         {
             string assemblyName = Path.GetFileNameWithoutExtension(assemblyPath);
             using (Stream assemblyStream = File.Open(assemblyPath, FileMode.Create))
@@ -45,6 +45,7 @@
                             pdbStream,
                             sourceFile,
                             buildOutput,
+                            debug,
                             cancellationToken: cancellationToken);
                         if (!result.Success)
                         {
@@ -55,7 +56,7 @@
             }
         }
 
-        public static Task<EmitResult> SaveCompilationAsync(this CompositionConfiguration configuration, string assemblyName, Stream assemblyStream, Stream pdbStream = null, Stream sourceFile = null, TextWriter buildOutput = null, CancellationToken cancellationToken = default(CancellationToken))
+        public static Task<EmitResult> SaveCompilationAsync(this CompositionConfiguration configuration, string assemblyName, Stream assemblyStream, Stream pdbStream = null, Stream sourceFile = null, TextWriter buildOutput = null, bool debug = false, CancellationToken cancellationToken = default(CancellationToken))
         {
             Requires.NotNull(configuration, "configuration");
             Requires.NotNullOrEmpty(assemblyName, "assemblyName");
@@ -65,7 +66,6 @@
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                bool debug = pdbStream != null;
                 CSharpCompilation templateCompilation = CreateTemplateCompilation(assemblyName, debug);
 
                 var compilation = await AddGeneratedCodeAndDependenciesAsync(templateCompilation, configuration, sourceFile, cancellationToken);
@@ -122,6 +122,7 @@
                 Assembly.GetExecutingAssembly(),
                 Assembly.Load("System.Runtime, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"),
                 Assembly.Load("System.Reflection, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"),
+                Assembly.Load("System.Collections, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"),
                 typeof(ILazy<>).Assembly,
                 typeof(Lazy<,>).Assembly,
                 typeof(System.Composition.ExportFactory<>).Assembly,
@@ -155,6 +156,7 @@
                 buildOutput: buildOutput);
             if (result.Success)
             {
+                await buildOutput.WriteLineAsync("Generated assembly size: " + assemblyStream.Length);
                 var compositionAssembly = Assembly.Load(assemblyStream.ToArray());
                 return CompositionConfiguration.Load(compositionAssembly);
             }
@@ -168,25 +170,25 @@
         {
             var templateFactory = new CompositionTemplateFactory();
             templateFactory.Configuration = configuration;
-            string source = templateFactory.TransformText();
+            var source = templateFactory.CreateSourceFile().NormalizeWhitespace();
 
-            SyntaxTree syntaxTree;
+            SyntaxTree syntaxTree = source.SyntaxTree;
             if (sourceFile != null)
             {
                 FileStream sourceFileStream = sourceFile as FileStream;
                 string sourceFilePath = sourceFileStream != null ? sourceFileStream.Name : null;
                 Encoding encoding = new UTF8Encoding(true);
                 var writer = new StreamWriter(sourceFile, encoding);
-                await writer.WriteAsync(source);
+                source.WriteTo(writer);
                 await writer.FlushAsync();
+
+                // Unfortunately, we have to reparse the file in order to get the encoding into Roslyn
+                // so its compiler doesn't fail with a CS8055 error.
                 sourceFile.Position = 0;
                 syntaxTree = SyntaxFactory.ParseSyntaxTree(SourceText.From(sourceFile, encoding), path: sourceFilePath ?? string.Empty, cancellationToken: cancellationToken);
             }
-            else
-            {
-                syntaxTree = SyntaxFactory.ParseSyntaxTree(source);
-            }
 
+            cancellationToken.ThrowIfCancellationRequested();
             var assemblies = ImmutableHashSet.Create<Assembly>()
                 .Union(configuration.AdditionalReferenceAssemblies)
                 .Union(templateFactory.RelevantAssemblies);

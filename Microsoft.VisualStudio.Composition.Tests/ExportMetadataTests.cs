@@ -126,7 +126,7 @@
             Assert.IsType<MetadataEnum>(metadataValue);
         }
 
-        [MefFact(CompositionEngines.V1, typeof(ExportWithNonPublicEnumMetadata))]
+        [MefFact(CompositionEngines.V1Compat, typeof(ExportWithNonPublicEnumMetadata))]
         public void NonPublicMetadataEnumValue(IContainer container)
         {
             var part = container.GetExport<ExportWithNonPublicEnumMetadata, IDictionary<string, object>>();
@@ -348,44 +348,62 @@
 
         #region GetExports (plural) tests
 
-        [MefFact(CompositionEngines.V1)]
+        [MefFact(CompositionEngines.V1Compat, new Type[0])]
         [Trait("Container.GetExport", "Plural")]
         public void GetNamedExportsTMetadataEmpty(IContainer container)
         {
-            IEnumerable<ILazy<object, IDictionary<string, object>>> result =
+            IEnumerable<Lazy<object, IDictionary<string, object>>> result =
                 container.GetExports<object, IDictionary<string, object>>("NoOneExportsThis");
             Assert.Equal(0, result.Count());
         }
 
-        [MefFact(CompositionEngines.V1, typeof(PartWithExportMetadataA), typeof(PartWithExportMetadataB), typeof(PartWithExportMetadataAB))]
+        [MefFact(CompositionEngines.V1Compat, typeof(PartWithExportMetadataA), typeof(PartWithExportMetadataB), typeof(PartWithExportMetadataAB))]
         [Trait("Container.GetExport", "Plural")]
-        public void GetNamedExportsTMetadata(IContainer container)
+        [Trait("Metadata", "TMetadata")]
+        public void GetNamedExportsTMetadataInterface(IContainer container)
         {
-            IEnumerable<ILazy<object, IDictionary<string, object>>> result =
-                container.GetExports<object, IDictionary<string, object>>("ExportWithMetadata");
-            Assert.Equal(3, result.Count());
-            var a = result.Single(e => !e.Metadata.ContainsKey("B") && e.Metadata.ContainsKey("a") && "b".Equals(e.Metadata["a"]));
-            var b = result.Single(e => !e.Metadata.ContainsKey("a") && e.Metadata.ContainsKey("B") && "c".Equals(e.Metadata["B"]));
-            var ab = result.Single(e => e.Metadata.ContainsKey("a") && "b".Equals(e.Metadata["a"]) && e.Metadata.ContainsKey("B") && "c".Equals(e.Metadata["B"]));
+            IEnumerable<Lazy<object, IMetadata>> result =
+                container.GetExports<object, IMetadata>("ExportWithMetadata");
+            Assert.Equal(2, result.Count());
+            var a = result.Single(e => e.Metadata.a == "b" && e.Metadata.B == "someDefault");
+            var ab = result.Single(e => e.Metadata.a == "b" && e.Metadata.B == "c");
             Assert.IsType<PartWithExportMetadataA>(a.Value);
-            Assert.IsType<PartWithExportMetadataB>(b.Value);
             Assert.IsType<PartWithExportMetadataAB>(ab.Value);
+        }
+
+        [MefFact(CompositionEngines.V1Compat, typeof(PartWithExportMetadataA), typeof(PartWithExportMetadataB), typeof(PartWithExportMetadataAB))]
+        [Trait("Container.GetExport", "Plural")]
+        [Trait("Metadata", "TMetadata")]
+        public void GetNamedExportsTMetadataClass(IContainer container)
+        {
+            IEnumerable<Lazy<object, MetadataClass>> result =
+                container.GetExports<object, MetadataClass>("ExportWithMetadata");
+
+            // Evidently MEF doesn't apply metadata view filters to exports when the metadata view is a class.
+            Assert.Equal(3, result.Count());
+
+            var aAndAB = result.Where(e => e.Metadata.a == "b");
+            var b = result.Single(e => e.Metadata.a == null);
+            aAndAB.Single(a => a.Value is PartWithExportMetadataA);
+            aAndAB.Single(a => a.Value is PartWithExportMetadataAB);
+            Assert.IsType<PartWithExportMetadataB>(b.Value);
         }
 
         [MefFact(CompositionEngines.V1Compat, typeof(FooExport1), typeof(FooExport2))]
         [Trait("Container.GetExport", "Plural")]
         public void GetExportsTMetadataEmpty(IContainer container)
         {
-            IEnumerable<ILazy<object, IDictionary<string, object>>> result =
+            IEnumerable<Lazy<object, IDictionary<string, object>>> result =
                 container.GetExports<object, IDictionary<string, object>>();
             Assert.Equal(0, result.Count());
         }
 
-        [MefFact(CompositionEngines.V1, typeof(FooExport1), typeof(FooExport2))]
+        [MefFact(CompositionEngines.V1Compat, typeof(FooExport1), typeof(FooExport2))]
         [Trait("Container.GetExport", "Plural")]
+        [Trait("Metadata", "TMetadata")]
         public void GetExportsTMetadata(IContainer container)
         {
-            IEnumerable<ILazy<IFoo, IMetadataBase>> result =
+            IEnumerable<Lazy<IFoo, IMetadataBase>> result =
                 container.GetExports<IFoo, IMetadataBase>();
             Assert.Equal(2, result.Count());
 
@@ -396,11 +414,23 @@
             Assert.IsType<FooExport2>(b.Value);
         }
 
+        [MefFact(CompositionEngines.V1Compat, typeof(FooExport1))]
+        [Trait("Container.GetExport", "Plural")]
+        [Trait("Metadata", "TMetadata")]
+        public void MetadataViewProxyHandlesObjectMethods(IContainer container)
+        {
+            var result = container.GetExports<IFoo, IMetadataBase>().First();
+            Assert.True(result.Metadata.Equals(result.Metadata));
+            result.Metadata.GetHashCode();
+            Assert.NotNull(result.Metadata.GetType());
+            Assert.NotNull(result.Metadata.ToString());
+        }
+
         [MefFact(CompositionEngines.V1Compat, typeof(FooExport1), typeof(FooExport2))]
         [Trait("Container.GetExport", "Plural")]
         public void GetExportsDictionaryMetadata(IContainer container)
         {
-            IEnumerable<ILazy<IFoo, IDictionary<string, object>>> result =
+            IEnumerable<Lazy<IFoo, IDictionary<string, object>>> result =
                 container.GetExports<IFoo, IDictionary<string, object>>();
             Assert.Equal(2, result.Count());
 
