@@ -117,6 +117,8 @@
     <Compile Include="LazyPart`1.cs" />
     <Compile Include="LightweightPartDiscovery.cs" />
     <Compile Include="LightweightPartDiscoveryV1.cs" />
+    <Compile Include="LightweightPartDiscoveryV2.cs" />
+    <Compile Include="MetadataReaderExtensions.cs" />
     <Compile Include="PartCreationPolicyImportConstraint.cs" />
     <Compile Include="PartDiscovery.cs" />
     <Compile Include="ComposablePartDefinition.cs" />

@@ -14,7 +14,7 @@
 
     public abstract class LightweightPartDiscovery
     {
-        public abstract ComposablePartDefinition CreatePart(TypeDefinition typeSymbol);
+        public abstract ComposablePartDefinition CreatePart(MetadataReader metadataReader, TypeDefinition typeDefinition);
 
         /// <summary>
         /// Creates MEF parts from an assembly.
@@ -30,6 +30,7 @@
                 var metadataReader = peReader.GetMetadataReader();
                 var typeNames = from typeHandle in metadataReader.TypeDefinitions
                                 let typeDef = metadataReader.GetTypeDefinition(typeHandle)
+                                let part = this.CreatePart(metadataReader, typeDef)
                                 let ns = metadataReader.GetString(typeDef.Namespace)
                                 let name = metadataReader.GetString(typeDef.Name)
                                 select ns + "." + name;

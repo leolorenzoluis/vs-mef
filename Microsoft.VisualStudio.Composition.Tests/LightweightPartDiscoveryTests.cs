@@ -13,7 +13,7 @@
         [Fact]
         public void LightweightPartDiscovery()
         {
-            var discovery = new LightweightPartDiscoveryV1();
+            var discovery = new LightweightPartDiscoveryV2();
             discovery.CreateParts(File.Open(typeof(string).Assembly.Location, FileMode.Open, FileAccess.Read, FileShare.Read));
         }
     }
