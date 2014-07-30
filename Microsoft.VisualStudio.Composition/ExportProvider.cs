@@ -10,6 +10,7 @@
     using System.Reflection;
     using System.Runtime.CompilerServices;
     using System.Text;
+    using System.Threading;
     using System.Threading.Tasks;
     using Validation;
     using DefaultMetadataType = System.Collections.Generic.IDictionary<string, object>;
@@ -39,6 +40,18 @@
         protected static readonly ImmutableDictionary<string, object> EmptyMetadata = ImmutableDictionary.Create<string, object>();
 
         /// <summary>
+        /// An array initialized by the generated code derived class that contains the value of 
+        /// AssemblyName.FullName for each assembly that must be reflected into.
+        /// </summary>
+        protected string[] assemblyNames;
+
+        /// <summary>
+        /// An array initialized by the generated code derived class that contains the value of 
+        /// AssemblyName.CodeBasePath for each assembly that must be reflected into.
+        /// </summary>
+        protected string[] assemblyCodeBasePaths;
+
+        /// <summary>
         /// An array of manifest modules required for access by reflection.
         /// </summary>
         /// <remarks>
@@ -64,6 +77,10 @@
             PassthroughMetadataViewProvider.Default,
             MetadataViewClassProvider.Default);
 
+        private static readonly IAssemblyLoader BuiltInAssemblyLoader = new AssemblyLoaderByFullName();
+
+        private ThreadLocal<bool> initializingAssemblyLoader = new ThreadLocal<bool>();
+
         /// <summary>
         /// The metadata view providers available to this ExportProvider.
         /// </summary>
@@ -71,6 +88,8 @@
         /// This field is lazy to avoid a chicken-and-egg problem with initializing it in our constructor.
         /// </remarks>
         private readonly Lazy<ImmutableList<Lazy<IMetadataViewProvider, IReadOnlyDictionary<string, object>>>> metadataViewProviders;
+
+        private readonly Lazy<IAssemblyLoader> assemblyLoadProvider;
 
         /// <summary>
         /// An array of types 
@@ -118,6 +137,9 @@
             this.metadataViewProviders = new Lazy<ImmutableList<Lazy<IMetadataViewProvider, IReadOnlyDictionary<string, object>>>>(
                 () => ImmutableList.CreateRange(this.GetExports<IMetadataViewProvider, IReadOnlyDictionary<string, object>>())
                     .Sort((first, second) => -GetOrderMetadata(first.Metadata).CompareTo(GetOrderMetadata(second.Metadata))));
+            this.assemblyLoadProvider = new Lazy<IAssemblyLoader>(
+                () => ImmutableList.CreateRange(this.GetExports<IAssemblyLoader, IReadOnlyDictionary<string, object>>())
+                    .Sort((first, second) => -GetOrderMetadata(first.Metadata).CompareTo(GetOrderMetadata(second.Metadata))).Select(v => v.Value).FirstOrDefault() ?? BuiltInAssemblyLoader);
         }
 
         bool IDisposableObservable.IsDisposed
@@ -263,15 +285,15 @@
         /// </remarks>
         protected abstract IEnumerable<Export> GetExportsCore(ImportDefinition importDefinition);
 
-        protected Export CreateExport(ImportDefinition importDefinition, IReadOnlyDictionary<string, object> metadata, int partOpenGenericTypeId, string valueFactoryMethodName, string partSharingBoundary, bool nonSharedInstanceRequired, MemberInfo exportingMember)
+        protected Export CreateExport(ImportDefinition importDefinition, IReadOnlyDictionary<string, object> metadata, int partOpenGenericTypeId, Type valueFactoryMethodDeclaringType, string valueFactoryMethodName, string partSharingBoundary, bool nonSharedInstanceRequired, MemberInfo exportingMember)
         {
             Requires.NotNull(importDefinition, "importDefinition");
             Requires.NotNull(metadata, "metadata");
 
             var typeArgs = (Type[])importDefinition.Metadata[CompositionConstants.GenericParametersMetadataName];
-            var valueFactoryOpenGenericMethodInfo = this.GetMethodWithArity(valueFactoryMethodName, typeArgs.Length);
+            var valueFactoryOpenGenericMethodInfo = this.GetMethodWithArity(valueFactoryMethodDeclaringType, valueFactoryMethodName, typeArgs.Length);
             var valueFactoryMethodInfo = valueFactoryOpenGenericMethodInfo.MakeGenericMethod(typeArgs);
-            var valueFactory = (Func<Dictionary<int, object>, object>)valueFactoryMethodInfo.CreateDelegate(typeof(Func<Dictionary<int, object>, object>), this);
+            var valueFactory = (Func<ExportProvider, Dictionary<int, object>, object>)valueFactoryMethodInfo.CreateDelegate(typeof(Func<ExportProvider, Dictionary<int, object>, object>), null);
 
             Type partOpenGenericType = this.GetType(partOpenGenericTypeId);
             Type partType = partOpenGenericType.MakeGenericType(typeArgs);
@@ -280,7 +302,7 @@
             return this.CreateExport(importDefinition, metadata, partTypeId, valueFactory, partSharingBoundary, nonSharedInstanceRequired, exportingMember);
         }
 
-        protected Export CreateExport(ImportDefinition importDefinition, IReadOnlyDictionary<string, object> metadata, int partTypeId, Func<Dictionary<int, object>, object> valueFactory, string partSharingBoundary, bool nonSharedInstanceRequired, MemberInfo exportingMember)
+        protected Export CreateExport(ImportDefinition importDefinition, IReadOnlyDictionary<string, object> metadata, int partTypeId, Func<ExportProvider, Dictionary<int, object>, object> valueFactory, string partSharingBoundary, bool nonSharedInstanceRequired, MemberInfo exportingMember)
         {
             Requires.NotNull(importDefinition, "importDefinition");
             Requires.NotNull(metadata, "metadata");
@@ -333,7 +355,7 @@
             throw new NotSupportedException();
         }
 
-        protected ILazy<object> GetOrCreateShareableValue(int partTypeId, Func<Dictionary<int, object>, object> valueFactory, Dictionary<int, object> provisionalSharedObjects, string partSharingBoundary, bool nonSharedInstanceRequired)
+        protected ILazy<object> GetOrCreateShareableValue(int partTypeId, Func<ExportProvider, Dictionary<int, object>, object> valueFactory, Dictionary<int, object> provisionalSharedObjects, string partSharingBoundary, bool nonSharedInstanceRequired)
         {
             ILazy<System.Object> lazyResult;
             if (!nonSharedInstanceRequired)
@@ -345,7 +367,7 @@
                 }
             }
 
-            lazyResult = new LazyPart<object>(() => valueFactory(provisionalSharedObjects));
+            lazyResult = new LazyPart<object>(() => valueFactory(this, provisionalSharedObjects));
 
             if (!nonSharedInstanceRequired)
             {
@@ -395,9 +417,9 @@
             }
         }
 
-        protected MethodInfo GetMethodWithArity(string methodName, int arity)
+        protected MethodInfo GetMethodWithArity(Type declaringType, string methodName, int arity)
         {
-            return this.GetType().GetTypeInfo().GetDeclaredMethods(methodName)
+            return declaringType.GetTypeInfo().GetDeclaredMethods(methodName)
                 .Single(m => m.GetGenericArguments().Length == arity);
         }
 
@@ -411,9 +433,44 @@
             Module result = cachedManifests[assemblyId];
             if (result == null)
             {
+                // We have to be very careful about getting the assembly loader because it may itself be
+                // a MEF component that is in an assembly that must be loaded.
+                // So we'll go ahead and try to use the right loader, but if we get re-entered in the meantime,
+                // on the same thread, we'll fallback to using our built-in one.
+                // The requirement then is that any assembly loader provider must be in an assembly that can be
+                // loaded using our built-in one.
+                IAssemblyLoader loader;
+                if (!this.assemblyLoadProvider.IsValueCreated)
+                {
+                    if (this.initializingAssemblyLoader.Value)
+                    {
+                        loader = BuiltInAssemblyLoader;
+                    }
+                    else
+                    {
+                        this.initializingAssemblyLoader.Value = true;
+                        try
+                        {
+                            loader = this.assemblyLoadProvider.Value;
+                        }
+                        finally
+                        {
+                            this.initializingAssemblyLoader.Value = false;
+                        }
+                    }
+                }
+                else
+                {
+                    loader = this.assemblyLoadProvider.Value;
+                }
+
+                Assembly assembly = loader.LoadAssembly(
+                    this.assemblyNames[assemblyId],
+                    this.assemblyCodeBasePaths[assemblyId]);
+
                 // We don't need to worry about thread-safety here because if two threads assign the
                 // reference to the loaded assembly to the array slot, that's just fine.
-                result = Assembly.Load(new AssemblyName(this.GetAssemblyName(assemblyId))).ManifestModule;
+                result = assembly.ManifestModule;
                 cachedManifests[assemblyId] = result;
             }
 
@@ -481,15 +538,6 @@
         }
 
         /// <summary>
-        /// When overridden in the derived code-gen'd class, this method gets the full name
-        /// of an assembly for an integer that the code-gen knows about.
-        /// </summary>
-        protected virtual string GetAssemblyName(int assemblyId)
-        {
-            throw new NotImplementedException();
-        }
-
-        /// <summary>
         /// When overridden in the derived code-gen'd class, this method gets the type
         /// for an integer that the code-gen knows about.
         /// </summary>
@@ -526,7 +574,7 @@
                 {
                     if (!metadataBuilder.ContainsKey(property.Name))
                     {
-                        var defaultValueAttribute = property.GetCustomAttributes<DefaultValueAttribute>().FirstOrDefault();
+                        var defaultValueAttribute = property.GetCustomAttributesCached<DefaultValueAttribute>().FirstOrDefault();
                         if (defaultValueAttribute != null)
                         {
                             metadataBuilder.Add(property.Name, defaultValueAttribute.Value);
@@ -894,6 +942,18 @@
                                                   where paramInfo.IsAssignableFrom(typeof(ImmutableDictionary<string, object>).GetTypeInfo())
                                                   select ctor;
                 return publicCtorsWithOneParameter.FirstOrDefault();
+            }
+        }
+
+        private class AssemblyLoaderByFullName : IAssemblyLoader
+        {
+            public Assembly LoadAssembly(string assemblyFullName, string codeBasePath)
+            {
+                // We can't use codeBasePath here because this is a PCL, and the
+                // facade assembly we reference doesn't expose AssemblyName.CodeBasePath.
+                // That's why the MS.VS.Composition.Configuration.dll has another IAssemblyLoader
+                // that we prefer over this one. It does the codebasepath thing.
+                return Assembly.Load(new AssemblyName(assemblyFullName));
             }
         }
     }
