@@ -295,6 +295,17 @@
         protected abstract ComposablePartDefinition CreatePart(Type partType, bool typeExplicitlyRequested);
 
         /// <summary>
+        /// Get the sharing boundaries that must never be applied to this part.
+        /// </summary>
+        protected IReadOnlyCollection<string> GetProhibitedSharingBoundariesForPart(Type partType)
+        {
+            Requires.NotNull(partType, "partType");
+
+            var prohibitedBoundaries = partType.GetCustomAttributesCached<ProhibitedSharingBoundaryAttribute>();
+            return ImmutableHashSet.CreateRange(prohibitedBoundaries.Select(a => a.ProhibitedSharingBoundary));
+        }
+
+        /// <summary>
         /// Checks whether an import many collection is creatable.
         /// </summary>
         internal static bool IsImportManyCollectionTypeCreateable(ImportDefinitionBinding import)

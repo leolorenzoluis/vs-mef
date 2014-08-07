@@ -418,6 +418,14 @@
             {
                 if (!string.IsNullOrEmpty(sharingBoundary))
                 {
+                    if (this.PartDefinition.ProhibitedSharingBoundaries.Contains(sharingBoundary))
+                    {
+                        // TODO: Work into this some analysis and better error messages that present the chain of
+                        //       imports that led to this.
+                        //       Also try to do some root cause analysis and reject the guilty part.
+                        throw new CompositionFailedException("Prohibited sharing boundary.");
+                    }
+
                     if (this.RequiredSharingBoundaries.Add(sharingBoundary))
                     {
                         // Since this is new to us, be sure that all our importers belong to this sharing boundary as well.

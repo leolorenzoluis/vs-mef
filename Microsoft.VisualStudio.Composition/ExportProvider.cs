@@ -28,6 +28,7 @@
             ImmutableDictionary<MemberRef, IReadOnlyCollection<ExportDefinition>>.Empty,
             ImmutableList<ImportDefinitionBinding>.Empty,
             string.Empty,
+            ImmutableHashSet<string>.Empty,
             default(MethodRef),
             null,
             CreationPolicy.Shared,

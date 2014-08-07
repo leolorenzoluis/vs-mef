@@ -166,12 +166,15 @@
                     }
                 }
 
+                var prohibitedSharingBoundaries = this.GetProhibitedSharingBoundariesForPart(partType);
+
                 return new ComposablePartDefinition(
                     TypeRef.Get(partType),
                     exportsOnType.ToImmutable(),
                     exportsOnMembers.ToImmutable(),
                     imports.ToImmutable(),
                     partCreationPolicy != CreationPolicy.NonShared ? string.Empty : null,
+                    prohibitedSharingBoundaries,
                     MethodRef.Get(onImportsSatisfied),
                     importingCtor != null ? importingConstructorParameters.ToImmutable() : null, // some MEF parts are only for metadata
                     partCreationPolicy,

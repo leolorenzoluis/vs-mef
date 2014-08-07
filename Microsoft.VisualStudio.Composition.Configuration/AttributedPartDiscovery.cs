@@ -136,12 +136,15 @@
                     importingConstructorParameters.Add(import);
                 }
 
+                var prohibitedSharingBoundaries = this.GetProhibitedSharingBoundariesForPart(partType);
+
                 return new ComposablePartDefinition(
                     TypeRef.Get(partType),
                     exportsOnType.ToImmutable(),
                     exportsOnMembers.ToImmutable(),
                     imports.ToImmutable(),
                     sharingBoundary,
+                    prohibitedSharingBoundaries,
                     MethodRef.Get(onImportsSatisfied),
                     importingConstructorParameters.ToImmutable(),
                     partCreationPolicy);

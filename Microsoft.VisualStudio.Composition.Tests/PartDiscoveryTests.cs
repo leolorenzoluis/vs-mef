@@ -148,6 +148,7 @@
                     ImmutableDictionary.Create<MemberRef, IReadOnlyCollection<ExportDefinition>>(),
                     ImmutableList.Create<ImportDefinitionBinding>(),
                     null,
+                    ImmutableHashSet<string>.Empty,
                     default(MethodRef),
                     ImmutableList.Create<ImportDefinitionBinding>(),
                     CreationPolicy.Any,

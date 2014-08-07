@@ -44,6 +44,7 @@
         #region Common MEF parts
 
         [Export, Shared]
+        [ProhibitedSharingBoundary("Project")]
         public class ProjectService
         {
             [Import, SharingBoundary("Project")]
@@ -57,6 +58,7 @@
         }
 
         [Export, Shared("Project")]
+        [ProhibitedSharingBoundary("ConfiguredProject")]
         public class Project
         {
             [Import]

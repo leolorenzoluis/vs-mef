@@ -23,13 +23,15 @@
         /// <param name="exportingMembers">The exporting members.</param>
         /// <param name="importingMembers">The importing members.</param>
         /// <param name="sharingBoundary">The sharing boundary that this part is shared within.</param>
+        /// <param name="prohibitedSharingBoundaries">The sharing boundaries that are toxic to this part and represent an error elsewhere in the composition.</param>
         /// <param name="onImportsSatisfied">The method to invoke after satisfying imports, if any.</param>
         /// <param name="importingConstructor">The importing arguments taken by the importing constructor. <c>null</c> if the part cannot be instantiated.</param>
         /// <param name="partCreationPolicy">The creation policy for this part.</param>
         /// <param name="isSharingBoundaryInferred">A value indicating whether the part does not have an explicit sharing boundary, and therefore can obtain its sharing boundary based on its imports.</param>
-        public ComposablePartDefinition(TypeRef partType, IReadOnlyCollection<ExportDefinition> exportedTypes, IReadOnlyDictionary<MemberRef, IReadOnlyCollection<ExportDefinition>> exportingMembers, IReadOnlyList<ImportDefinitionBinding> importingMembers, string sharingBoundary, MethodRef onImportsSatisfied, IReadOnlyList<ImportDefinitionBinding> importingConstructor, CreationPolicy partCreationPolicy, bool isSharingBoundaryInferred = false)
+        public ComposablePartDefinition(TypeRef partType, IReadOnlyCollection<ExportDefinition> exportedTypes, IReadOnlyDictionary<MemberRef, IReadOnlyCollection<ExportDefinition>> exportingMembers, IReadOnlyList<ImportDefinitionBinding> importingMembers, string sharingBoundary, IReadOnlyCollection<string> prohibitedSharingBoundaries, MethodRef onImportsSatisfied, IReadOnlyList<ImportDefinitionBinding> importingConstructor, CreationPolicy partCreationPolicy, bool isSharingBoundaryInferred = false)
         {
             Requires.NotNull(partType, "partType");
+            Requires.NotNull(prohibitedSharingBoundaries, "prohibitedSharingBoundaries");
             Requires.NotNull(exportedTypes, "exportedTypes");
             Requires.NotNull(exportingMembers, "exportingMembers");
             Requires.NotNull(importingMembers, "importingMembers");
@@ -39,6 +41,7 @@
             this.ExportingMembers = exportingMembers;
             this.ImportingMembers = ImmutableHashSet.CreateRange(importingMembers);
             this.SharingBoundary = sharingBoundary;
+            this.ProhibitedSharingBoundaries = ImmutableHashSet.CreateRange(prohibitedSharingBoundaries);
             this.OnImportsSatisfiedRef = onImportsSatisfied;
             this.ImportingConstructor = importingConstructor;
             this.CreationPolicy = partCreationPolicy;
@@ -58,6 +61,15 @@
         }
 
         public string SharingBoundary { get; private set; }
+
+        /// <summary>
+        /// Gets the set of sharing boundaries that must not be applied to this part.
+        /// </summary>
+        /// <remarks>
+        /// Any attempt to apply this sharing boundary (by virtue of imported parts)
+        /// signifies a bug elsewhere in the composition.
+        /// </remarks>
+        public ImmutableHashSet<string> ProhibitedSharingBoundaries { get; private set; }
 
         /// <summary>
         /// Gets a value indicating whether the sharing boundary must be inferred from what is imported.
