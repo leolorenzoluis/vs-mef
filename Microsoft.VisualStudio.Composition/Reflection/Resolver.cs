@@ -9,7 +9,7 @@
 
     public static class Resolver
     {
-        private static readonly Dictionary<AssemblyName, Module> assemblyManifests = new Dictionary<AssemblyName, Module>();
+        private static readonly Dictionary<AssemblyName, Module> assemblyManifests = new Dictionary<AssemblyName, Module>(ByValueEquality.AssemblyName);
 
         public static Type Resolve(this TypeRef typeRef)
         {
@@ -21,8 +21,12 @@
             Type type = GetManifest(typeRef.AssemblyName).ResolveType(typeRef.MetadataToken);
             if (typeRef.GenericTypeArguments.Length > 0)
             {
-                Type constructedType = type.MakeGenericType(typeRef.GenericTypeArguments.Select(Resolve).ToArray());
-                return constructedType;
+                type = type.MakeGenericType(typeRef.GenericTypeArguments.Select(Resolve).ToArray());
+            }
+
+            if (typeRef.IsArray)
+            {
+                type = type.MakeArrayType();
             }
 
             return type;
@@ -180,12 +184,15 @@
                 assemblyManifests.TryGetValue(assemblyName, out module);
             }
 
-            var assembly = Assembly.Load(assemblyName);
-            module = assembly.ManifestModule;
-
-            lock (assemblyManifests)
+            if (module == null)
             {
-                assemblyManifests[assemblyName] = module;
+                var assembly = Assembly.Load(assemblyName);
+                module = assembly.ManifestModule;
+
+                lock (assemblyManifests)
+                {
+                    assemblyManifests[assemblyName] = module;
+                }
             }
 
             return module;
