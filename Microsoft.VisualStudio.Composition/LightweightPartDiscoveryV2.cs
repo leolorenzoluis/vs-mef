@@ -15,16 +15,16 @@
 
         protected override ComposablePartDefinition CreatePart(MetadataReader metadataReader, TypeDefinition typeDefinition)
         {
-            foreach (CustomAttributeHandle typeAttributeHandle in typeDefinition.GetCustomAttributes())
-            {
-                CustomAttribute attribute = metadataReader.GetCustomAttribute(typeAttributeHandle);
-                Handle attributeTypeHandle = metadataReader.GetAttributeTypeHandle(attribute);
-                int token = metadataReader.GetToken(attributeTypeHandle);
-                //typeof(string).GetTypeInfo().Assembly.ManifestModule
+            //foreach (CustomAttributeHandle typeAttributeHandle in typeDefinition.GetCustomAttributes())
+            //{
+            //    CustomAttribute attribute = metadataReader.GetCustomAttribute(typeAttributeHandle);
+            //    Handle attributeTypeHandle = metadataReader.GetAttributeTypeHandle(attribute);
+            //    int token = metadataReader.GetToken(attributeTypeHandle);
+            //    //typeof(string).GetTypeInfo().Assembly.ManifestModule
 
-                ExportDefinitionBinding exportDefinitionBinding;
-                this.TryHandleExportAttribute(metadataReader, attribute, attributeTypeHandle, out exportDefinitionBinding);
-            }
+            //    ExportDefinitionBinding exportDefinitionBinding;
+            //    this.TryHandleExportAttribute(metadataReader, attribute, attributeTypeHandle, out exportDefinitionBinding);
+            //}
 
             return null;
         }
