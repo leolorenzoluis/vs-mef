@@ -9,6 +9,7 @@
     using Xunit;
     using MefV1 = System.ComponentModel.Composition;
 
+    [Trait("SharingBoundary", "")]
     public class ProjectSystemInvalidMocksTests
     {
         [MefFact(CompositionEngines.V3EmulatingV1AndV2AtOnce | CompositionEngines.V3AllowConfigurationWithErrors,

@@ -53,8 +53,21 @@
             }
         }
 
-        public IEnumerable<ComposedPartDiagnostic> Validate()
+        public IEnumerable<ComposedPartDiagnostic> Validate(IReadOnlyCollection<string> reachableSharingBoundaries, Func<ComposablePartDefinition, IEnumerable<string>> getEffectiveSharingBoundaries)
         {
+            Requires.NotNull(reachableSharingBoundaries, "reachableSharingBoundaries");
+            Requires.NotNull(getEffectiveSharingBoundaries, "getEffectiveSharingBoundaries");
+
+            var unreachableSharingBoundaries = this.RequiredSharingBoundaries.Except(reachableSharingBoundaries);
+            if (unreachableSharingBoundaries.Count > 0)
+            {
+                yield return new ComposedPartDiagnostic(
+                    this,
+                    "{0}: Part requires sharing boundaries that are not created elsewhere in the composition: {1}",
+                    this.Definition.Type.FullName,
+                    string.Join(", ", unreachableSharingBoundaries));
+            }
+
             if (this.Definition.ExportDefinitions.Any(ed => CompositionConfiguration.ExportDefinitionPracticallyEqual.Default.Equals(ExportProvider.ExportProviderExportDefinition, ed.Value)) &&
                 !this.Definition.Equals(ExportProvider.ExportProviderPartDefinition))
             {
@@ -63,7 +76,8 @@
 
             foreach (var pair in this.SatisfyingExports)
             {
-                var importDefinition = pair.Key.ImportDefinition;
+                var importDefinitionBinding = pair.Key;
+                var importDefinition = importDefinitionBinding.ImportDefinition;
                 switch (importDefinition.Cardinality)
                 {
                     case ImportCardinality.ExactlyOne:
@@ -117,6 +131,23 @@
                                 "{0}: cannot import exported value from {1} because the exporting part cannot be instantiated. Is it missing an importing constructor?",
                                 GetDiagnosticLocation(pair.Key),
                                 GetDiagnosticLocation(export));
+                        }
+                    }
+
+                    if (importDefinitionBinding.IsExportFactory)
+                    {
+                        // Verify that the sharing boundaries available are sufficient to construct each value.
+                        var requiredSharingBoundariesForExport = ImmutableHashSet.CreateRange(getEffectiveSharingBoundaries(export.PartDefinition));
+                        var availableSharingBoundariesForExport = this.RequiredSharingBoundaries.Union(importDefinition.ExportFactorySharingBoundaries);
+                        var missingSharingBoundaries = requiredSharingBoundariesForExport.Except(availableSharingBoundariesForExport);
+                        if (!missingSharingBoundaries.IsEmpty)
+                        {
+                            yield return new ComposedPartDiagnostic(
+                                this,
+                                "{0}: cannot import ExportFactory<T> for export {1} because these sharing boundaries are not available: {2}",
+                                GetDiagnosticLocation(pair.Key),
+                                GetDiagnosticLocation(export),
+                                string.Join(", ", missingSharingBoundaries));
                         }
                     }
                 }

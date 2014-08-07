@@ -99,7 +99,9 @@
                 partBuilder.ApplySharingBoundary();
             }
 
-            var sharingBoundaryOverrides = ComputeInferredSharingBoundaries(partBuilders.Values);
+            var sharingBoundariesAndMetadata = ComputeSharingBoundaryMetadata(partBuilders.Values);
+            var createdSharingBoundaries = ImmutableHashSet.CreateRange(sharingBoundariesAndMetadata.Keys);
+            var sharingBoundaryOverrides = ComputeInferredSharingBoundaries(partBuilders.Values, sharingBoundariesAndMetadata);
 
             // Build up our set of composed parts.
             var partsBuilder = ImmutableHashSet.CreateBuilder<ComposedPart>();
@@ -115,7 +117,7 @@
             var errors = new List<ComposedPartDiagnostic>();
             foreach (var part in parts)
             {
-                errors.AddRange(part.Validate());
+                errors.AddRange(part.Validate(createdSharingBoundaries, p => partBuilders[p].RequiredSharingBoundaries));
             }
 
             // Detect loops of all non-shared parts.
@@ -268,9 +270,10 @@
         /// </summary>
         /// <param name="partBuilders">The part builders to build the map for.</param>
         /// <returns>A map of those parts with inferred boundaries where the key is the part and the value is its designated sharing boundary.</returns>
-        private static ImmutableDictionary<ComposablePartDefinition, string> ComputeInferredSharingBoundaries(IEnumerable<PartBuilder> partBuilders)
+        private static ImmutableDictionary<ComposablePartDefinition, string> ComputeInferredSharingBoundaries(IEnumerable<PartBuilder> partBuilders, ImmutableDictionary<string, SharingBoundaryMetadata> sharingBoundariesAndMetadata)
         {
-            var sharingBoundariesAndMetadata = ComputeSharingBoundaryMetadata(partBuilders);
+            Requires.NotNull(partBuilders, "partBuilders");
+            Requires.NotNull(sharingBoundariesAndMetadata, "sharingBoundariesAndMetadata");
 
             var sharingBoundaryOverrides = ImmutableDictionary.CreateBuilder<ComposablePartDefinition, string>();
             foreach (PartBuilder partBuilder in partBuilders)
@@ -282,8 +285,8 @@
                     //  * FILTER 2: can reach ALL the others by following UP the sharing boundary export factory chains.
                     var filter = from boundary in partBuilder.RequiredSharingBoundaries
                                  let others = partBuilder.RequiredSharingBoundaries.ToImmutableHashSet().Remove(boundary)
-                                 where !others.Any(other => sharingBoundariesAndMetadata[other].ParentBoundariesUnion.Contains(boundary)) // filter 1
-                                 where others.All(other => sharingBoundariesAndMetadata[boundary].ParentBoundariesIntersection.Contains(other)) // filter 2
+                                 where !others.Any(other => sharingBoundariesAndMetadata.ContainsKey(other) && sharingBoundariesAndMetadata[other].ParentBoundariesUnion.Contains(boundary)) // filter 1
+                                 where others.All(other => sharingBoundariesAndMetadata.ContainsKey(boundary) && sharingBoundariesAndMetadata[boundary].ParentBoundariesIntersection.Contains(other)) // filter 2
                                  select boundary;
                     var qualifyingSharingBoundaries = filter.ToList();
 
