@@ -104,6 +104,7 @@
     <Compile Include="Export.cs" />
     <Compile Include="ExportTypeIdentityConstraint.cs" />
     <Compile Include="IAssemblyLoader.cs" />
+    <Compile Include="IPartDiscovery.cs" />
     <Compile Include="IRuntimeCompositionCacheManager.cs" />
     <Compile Include="ICompositionCacheManager.cs" />
     <Compile Include="IDescriptiveToString.cs" />

@@ -51,8 +51,8 @@
                 var assemblies = this.assemblyNames.Select(Assembly.Load).ToList();
                 foreach (var discoveryModule in v3DiscoveryModules)
                 {
-                    var partsFromTypes = discoveryModule.CreatePartsAsync(this.parts).GetAwaiter().GetResult();
-                    var partsFromAssemblies = discoveryModule.CreatePartsAsync(assemblies).GetAwaiter().GetResult();
+                    var partsFromTypes = discoveryModule.CreateParts(this.parts);
+                    var partsFromAssemblies = discoveryModule.CreateParts(assemblies);
                     var catalog = ComposableCatalog.Create()
                         .WithParts(partsFromTypes)
                         .WithParts(partsFromAssemblies);
@@ -138,28 +138,58 @@
             }
         }
 
-        private IReadOnlyList<PartDiscovery> GetV3DiscoveryModules()
+        private class PartDiscoveryWrapper : IPartDiscovery
+        {
+            private PartDiscovery _pd;
+            public PartDiscoveryWrapper(PartDiscovery pd)
+            {
+                if (pd == null)
+                {
+                    throw new ArgumentNullException("pd");
+                }
+                _pd = pd;
+            }
+
+            public DiscoveredParts CreateParts(IEnumerable<Type> types)
+            {
+                return _pd.CreatePartsAsync(types).GetAwaiter().GetResult();
+            }
+
+            public DiscoveredParts CreateParts(IEnumerable<Assembly> assemblies)
+            {
+                return _pd.CreatePartsAsync(assemblies).GetAwaiter().GetResult();
+            }
+        }
+
+        private IReadOnlyList<IPartDiscovery> GetV3DiscoveryModules()
         {
             var titleAppends = new List<string>();
 
-            var discovery = new List<PartDiscovery>();
+            var discovery = new List<IPartDiscovery>();
             if (this.compositionVersions.HasFlag(CompositionEngines.V3EmulatingV1))
             {
-                discovery.Add(new AttributedPartDiscoveryV1());
+                discovery.Add(new PartDiscoveryWrapper(new AttributedPartDiscoveryV1()));
+                discovery.Add(new LightweightPartDiscoveryV1());
                 titleAppends.Add("V1");
             }
 
             if (this.compositionVersions.HasFlag(CompositionEngines.V3EmulatingV2))
             {
-                discovery.Add(new AttributedPartDiscovery { IsNonPublicSupported = compositionVersions.HasFlag(CompositionEngines.V3EmulatingV2WithNonPublic) });
+                discovery.Add(new PartDiscoveryWrapper(
+                    new AttributedPartDiscovery { IsNonPublicSupported = compositionVersions.HasFlag(CompositionEngines.V3EmulatingV2WithNonPublic) }));
+                discovery.Add(new LightweightPartDiscoveryV2());
                 titleAppends.Add("V2");
             }
 
             if (this.compositionVersions.HasFlag(CompositionEngines.V3EmulatingV1AndV2AtOnce))
             {
-                discovery.Add(PartDiscovery.Combine(
+                discovery.Add(new PartDiscoveryWrapper(
+                    PartDiscovery.Combine(
                     new AttributedPartDiscoveryV1(),
-                    new AttributedPartDiscovery { IsNonPublicSupported = compositionVersions.HasFlag(CompositionEngines.V3EmulatingV2WithNonPublic) }));
+                    new AttributedPartDiscovery { IsNonPublicSupported = compositionVersions.HasFlag(CompositionEngines.V3EmulatingV2WithNonPublic) })));
+                discovery.Add(LightweightPartDiscovery.Combine(
+                    new LightweightPartDiscoveryV1(),
+                    new LightweightPartDiscoveryV2()));
                 titleAppends.Add("V1+V2");
             }
 

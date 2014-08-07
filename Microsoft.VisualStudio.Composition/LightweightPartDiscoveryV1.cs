@@ -8,9 +8,9 @@
 
     public class LightweightPartDiscoveryV1 : LightweightPartDiscovery
     {
-        public override ComposablePartDefinition CreatePart(System.Reflection.Metadata.MetadataReader metadataReader, System.Reflection.Metadata.TypeDefinition typeDefinition)
+        protected override ComposablePartDefinition CreatePart(System.Reflection.Metadata.MetadataReader metadataReader, System.Reflection.Metadata.TypeDefinition typeDefinition)
         {
-            throw new NotImplementedException();
+            return null;
         }
     }
 }

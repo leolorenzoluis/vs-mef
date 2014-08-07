@@ -13,7 +13,7 @@
     {
         private static Dictionary<Handle, bool> isExportAttributeCache = new Dictionary<Handle, bool>();
 
-        public override ComposablePartDefinition CreatePart(MetadataReader metadataReader, TypeDefinition typeDefinition)
+        protected override ComposablePartDefinition CreatePart(MetadataReader metadataReader, TypeDefinition typeDefinition)
         {
             foreach (CustomAttributeHandle typeAttributeHandle in typeDefinition.GetCustomAttributes())
             {
