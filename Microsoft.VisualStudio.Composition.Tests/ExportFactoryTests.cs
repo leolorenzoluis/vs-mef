@@ -335,6 +335,30 @@
 
         #endregion
 
+        #region Satisfy ExportFactory on runtime
+
+        [MefFact(CompositionEngines.V1, typeof(ExportToTestMatchingExportFactory))]
+        public void SatisfyExportFactoryOnRuntime(IContainer container)
+        {
+            var newImporter = new ExportToTestMatchingExportFactoryImporter();
+            MefV1.ICompositionService compositionService = container.GetExportedValue<MefV1.ICompositionService>();
+            System.ComponentModel.Composition.AttributedModelServices.SatisfyImportsOnce(compositionService, newImporter);
+            Assert.NotNull(newImporter.Factory);
+        }
+
+        [MefV1.Export]
+        [Export]
+        public class ExportToTestMatchingExportFactory { }
+
+        public class ExportToTestMatchingExportFactoryImporter
+        {
+            [MefV1.Import]
+            public MefV1.ExportFactory<ExportToTestMatchingExportFactory> Factory { get; set; }
+
+        }
+        
+        #endregion
+
         [MefV1.Export, MefV1.PartCreationPolicy(MefV1.CreationPolicy.NonShared)]
         [MefV1.ExportMetadata("N", "V")]
         [Export]
