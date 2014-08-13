@@ -12,8 +12,10 @@
     public class LightweightPartDiscoveryV2 : LightweightPartDiscovery
     {
         private static Dictionary<Handle, bool> isExportAttributeCache = new Dictionary<Handle, bool>();
+        private static LightweightPartDiscoveryV1 _v1 = new LightweightPartDiscoveryV1();
 
-        protected override ComposablePartDefinition CreatePart(MetadataReader metadataReader, TypeDefinition typeDefinition)
+        public override ComposablePartDefinition CreatePart(MetadataReader metadataReader, TypeDefinition typeDefinition,
+            HashSet<string> knownExportTypes, string assemblyName, int metadataToken)
         {
             //foreach (CustomAttributeHandle typeAttributeHandle in typeDefinition.GetCustomAttributes())
             //{
@@ -26,7 +28,7 @@
             //    this.TryHandleExportAttribute(metadataReader, attribute, attributeTypeHandle, out exportDefinitionBinding);
             //}
 
-            return null;
+            return _v1.CreatePart(metadataReader, typeDefinition, knownExportTypes, assemblyName, metadataToken);
         }
 
         private bool TryHandleExportAttribute(MetadataReader metadataReader, CustomAttribute customAttribute, Handle attributeTypeHandle, out ExportDefinitionBinding exportDefinitionBinding)

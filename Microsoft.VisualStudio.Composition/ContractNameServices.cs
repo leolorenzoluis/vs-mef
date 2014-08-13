@@ -4,6 +4,7 @@
     using System.Collections.Generic;
     using System.Linq;
     using System.Reflection;
+    using System.Reflection.Metadata;
     using System.Text;
     using System.Threading.Tasks;
     using Validation;
@@ -39,6 +40,26 @@
         internal static string GetTypeIdentity(Type type)
         {
             return GetTypeIdentity(type, true);
+        }
+
+        internal static string GetTypeIdentity(TypeDefinition typeDef, MetadataReader reader)
+        {
+            return GetTypeIdentity(typeDef, reader, true);
+        }
+
+        internal static string GetTypeIdentity(TypeDefinition typeDef, MetadataReader reader, bool formatGenericName)
+        {
+            return "Microsoft.VisualStudio.Composition.Tests.SimpleImportExportTests+" + reader.GetString(typeDef.Name);
+            /* TODO: Fix this to not be one contract only.
+            var nSpace = reader.GetString(typeDef.Namespace);
+            var name = reader.GetString(typeDef.Name);
+
+            if (string.IsNullOrEmpty(nSpace))
+            {
+                return name;
+            }
+
+            return nSpace + "." + name;*/
         }
 
         internal static string GetTypeIdentity(Type type, bool formatGenericName)

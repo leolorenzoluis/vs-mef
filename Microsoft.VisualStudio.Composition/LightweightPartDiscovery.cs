@@ -15,7 +15,8 @@
 
     public abstract class LightweightPartDiscovery : IPartDiscovery
     {
-        protected abstract ComposablePartDefinition CreatePart(MetadataReader metadataReader, TypeDefinition typeDefinition);
+        public abstract ComposablePartDefinition CreatePart(MetadataReader metadataReader, TypeDefinition typeDefinition, 
+            HashSet<string> knownExportTypes, string assemblyName, int metadataToken);
 
         /// <summary>
         /// Creates MEF parts from an assembly.
@@ -41,7 +42,9 @@
                     {
                         try
                         {
-                            parts.Add(CreatePart(metadataReader, td));
+                            var part = this.CreatePart(metadataReader, td, null, string.Empty, 0);
+                            if (part != null)
+                                parts.Add(part);
                         }
                         catch (Exception ex)
                         {
@@ -57,6 +60,25 @@
 
             return new DiscoveredParts(parts, exceptions);
         }
+        private static string ByteArrayToHexString(byte[] bytes, int digits = 0)
+        {
+            if (digits == 0)
+            {
+                digits = bytes.Length * 2;
+            }
+
+            char[] c = new char[digits];
+            byte b;
+            for (int i = 0; i < digits / 2; i++)
+            {
+                b = ((byte)(bytes[i] >> 4));
+                c[i * 2] = (char)(b > 9 ? b + 87 : b + 0x30);
+                b = ((byte)(bytes[i] & 0xF));
+                c[i * 2 + 1] = (char)(b > 9 ? b + 87 : b + 0x30);
+            }
+
+            return new string(c);
+        }
 
         public DiscoveredParts CreateParts(IEnumerable<Type> types)
         {
@@ -67,6 +89,11 @@
 
             var parts = new List<ComposablePartDefinition>();
             var exceptions = new List<Exception>();
+            var knownExportTypes = new HashSet<string>()
+            {
+                "System.ComponentModel.Composition.ExportAttribute",
+                "System.ComponentModel.Composition.InheritedExportAttribute"
+            };
             foreach (var assembly in assemblies)
             {
                 try
@@ -84,7 +111,9 @@
                                     {
                                         var definition = metadataReader.TypeDefinitions.First(td => type.MetadataToken == metadataReader.GetToken(td));
                                         var typeDefinition = metadataReader.GetTypeDefinition(definition);
-                                        parts.Add(this.CreatePart(metadataReader, typeDefinition));
+                                        var part = this.CreatePart(metadataReader, typeDefinition, knownExportTypes, assembly.Key.FullName, type.MetadataToken);
+                                        if (part != null)
+                                            parts.Add(part);
                                     }
                                     catch (Exception ex)
                                     {
@@ -144,13 +173,14 @@
                 this.discoveryMechanisms = discoveryMechanisms;
             }
 
-            protected override ComposablePartDefinition CreatePart(MetadataReader metadataReader, TypeDefinition typeDefinition)
+            public override ComposablePartDefinition CreatePart(MetadataReader metadataReader, TypeDefinition typeDefinition,
+                HashSet<string> knownExportTypes, string assemblyName, int metadataToken)
             {
                 Requires.NotNull(metadataReader, "metadataReader");
             
                 foreach (var discovery in this.discoveryMechanisms)
                 {
-                    var result = discovery.CreatePart(metadataReader, typeDefinition);
+                    var result = discovery.CreatePart(metadataReader, typeDefinition, knownExportTypes, assemblyName, metadataToken);
                     if (result != null)
                     {
                         return result;
