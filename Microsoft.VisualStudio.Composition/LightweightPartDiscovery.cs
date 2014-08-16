@@ -28,7 +28,7 @@
             Requires.NotNull(assemblyStream, "assemblyStream");
 
             var parts = new List<ComposablePartDefinition>();
-            var exceptions = new List<Exception>();
+            var exceptions = new List<PartDiscoveryException>();
 
             try
             {
@@ -48,14 +48,14 @@
                         }
                         catch (Exception ex)
                         {
-                            exceptions.Add(ex);
+                            exceptions.Add(new PartDiscoveryException("Failed reading type definition", ex));
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                exceptions.Add(ex);
+                exceptions.Add(new PartDiscoveryException("Failed getting types from assembly stream", ex));
             }
 
             return new DiscoveredParts(parts, exceptions);
@@ -88,7 +88,7 @@
                              select assembly;
 
             var parts = new List<ComposablePartDefinition>();
-            var exceptions = new List<Exception>();
+            var exceptions = new List<PartDiscoveryException>();
             var knownExportTypes = new HashSet<string>()
             {
                 "System.ComponentModel.Composition.ExportAttribute",
@@ -102,35 +102,35 @@
                     {
                         using (var peReader = new PEReader(str))
                         {
-                            try
+                            var metadataReader = peReader.GetMetadataReader();
+                            foreach (Type type in assembly)
                             {
-                                var metadataReader = peReader.GetMetadataReader();
-                                foreach (Type type in assembly)
+                                try
                                 {
-                                    try
+                                    var definition = metadataReader.TypeDefinitions.First(td => type.MetadataToken == metadataReader.GetToken(td));
+                                    var typeDefinition = metadataReader.GetTypeDefinition(definition);
+                                    var part = this.CreatePart(metadataReader, typeDefinition, knownExportTypes, assembly.Key.FullName, type.MetadataToken);
+                                    if (part != null)
+                                        parts.Add(part);
+                                }
+                                catch (Exception ex)
+                                {
+                                    exceptions.Add(new PartDiscoveryException("Failed to scan an individual type", ex)
                                     {
-                                        var definition = metadataReader.TypeDefinitions.First(td => type.MetadataToken == metadataReader.GetToken(td));
-                                        var typeDefinition = metadataReader.GetTypeDefinition(definition);
-                                        var part = this.CreatePart(metadataReader, typeDefinition, knownExportTypes, assembly.Key.FullName, type.MetadataToken);
-                                        if (part != null)
-                                            parts.Add(part);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        exceptions.Add(ex);
-                                    }
+                                        AssemblyPath = assembly.Key.Location,
+                                    });
                                 }
                             }
-                            catch (Exception ex)
-                            {
-                                exceptions.Add(ex);
-                            }
+
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    exceptions.Add(ex);
+                    exceptions.Add(new PartDiscoveryException("Failed enumerating types in assembly", ex)
+                    {
+                        AssemblyPath = assembly.Key.Location,
+                    });
                 }
             }
 
@@ -139,7 +139,7 @@
 
         public DiscoveredParts CreateParts(IEnumerable<Assembly> assemblies)
         {
-            DiscoveredParts toReturn = new DiscoveredParts(Enumerable.Empty<ComposablePartDefinition>(), Enumerable.Empty<Exception>());
+            DiscoveredParts toReturn = new DiscoveredParts(Enumerable.Empty<ComposablePartDefinition>(), Enumerable.Empty<PartDiscoveryException>());
             foreach (var assembly in assemblies)
             {
                 var location = assembly.Location;
