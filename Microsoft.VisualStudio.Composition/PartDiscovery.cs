@@ -6,6 +6,7 @@
     using System.Diagnostics;
     using System.Linq;
     using System.Reflection;
+    using System.Runtime.CompilerServices;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
@@ -52,7 +53,7 @@
         {
             Requires.NotNull(partTypes, "partTypes");
 
-            var tuple = this.CreateDiscoveryBlockChain(true, cancellationToken);
+            var tuple = this.CreateDiscoveryBlockChain(true, null, cancellationToken);
             foreach (Type type in partTypes)
             {
                 await tuple.Item1.SendAsync(type);
@@ -73,7 +74,7 @@
         {
             Requires.NotNull(assembly, "assembly");
 
-            return this.CreatePartsAsync(new[] { assembly }, cancellationToken);
+            return this.CreatePartsAsync(new[] { assembly }, null, cancellationToken);
         }
 
         public abstract bool IsExportFactoryType(Type type);
@@ -82,48 +83,69 @@
         /// Reflects over a set of assemblies and produces MEF parts for every applicable type.
         /// </summary>
         /// <param name="assemblies">The assemblies to search for MEF parts.</param>
+        /// <param name="progress">An optional way to receive progress updates on how discovery is progressing.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>A set of generated parts.</returns>
-        public async Task<DiscoveredParts> CreatePartsAsync(IEnumerable<Assembly> assemblies, CancellationToken cancellationToken = default(CancellationToken))
+        public async Task<DiscoveredParts> CreatePartsAsync(IEnumerable<Assembly> assemblies, IProgress<DiscoveryProgress> progress = null, CancellationToken cancellationToken = default(CancellationToken))
         {
             Requires.NotNull(assemblies, "assemblies");
 
-            var tuple = this.CreateDiscoveryBlockChain(false, cancellationToken);
-            var exceptions = new List<Exception>();
-            var assemblyBlock = new TransformManyBlock<Assembly, Type>(
-                a =>
+            var tuple = this.CreateAssemblyDiscoveryBlockChain(progress, cancellationToken);
+            foreach (var assembly in assemblies)
+            {
+                await tuple.Item1.SendAsync(assembly);
+            }
+
+            tuple.Item1.Complete();
+            var result = await tuple.Item2;
+            return result;
+        }
+
+        /// <summary>
+        /// Reflects over a set of assemblies and produces MEF parts for every applicable type.
+        /// </summary>
+        /// <param name="assemblyPaths">The paths to assemblies to search for MEF parts.</param>
+        /// <param name="progress">An optional way to receive progress updates on how discovery is progressing.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A set of generated parts.</returns>
+        public async Task<DiscoveredParts> CreatePartsAsync(IEnumerable<string> assemblyPaths, IProgress<DiscoveryProgress> progress = null, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            Requires.NotNull(assemblyPaths, "assemblyPaths");
+
+            var exceptions = new List<PartDiscoveryException>();
+            var tuple = this.CreateAssemblyDiscoveryBlockChain(progress, cancellationToken);
+            var assemblyLoader = new TransformManyBlock<string, Assembly>(
+                path =>
                 {
                     try
                     {
-                        // Fully realize any enumerable now so that we can catch the exception rather than
-                        // leave it to dataflow to catch it.
-                        return this.GetTypes(a).ToList();
+                        var assembly = Assembly.LoadFrom(path);
+                        return new Assembly[] { assembly };
                     }
                     catch (Exception ex)
                     {
                         lock (exceptions)
                         {
-                            exceptions.Add(ex);
+                            exceptions.Add(new PartDiscoveryException("Unable to load assembly for scanning.", ex) { AssemblyPath = path });
                         }
 
-                        return Enumerable.Empty<Type>();
+                        return Enumerable.Empty<Assembly>();
                     }
                 },
                 new ExecutionDataflowBlockOptions
                 {
-                    MaxDegreeOfParallelism = Debugger.IsAttached ? 1 : Environment.ProcessorCount,
                     CancellationToken = cancellationToken,
+                    MaxDegreeOfParallelism = Environment.ProcessorCount,
                 });
-            assemblyBlock.LinkTo(tuple.Item1, new DataflowLinkOptions { PropagateCompletion = true });
-
-            foreach (var assembly in assemblies)
+            assemblyLoader.LinkTo(tuple.Item1, new DataflowLinkOptions { PropagateCompletion = true });
+            foreach (var assemblyPath in assemblyPaths)
             {
-                await assemblyBlock.SendAsync(assembly);
+                await assemblyLoader.SendAsync(assemblyPath);
             }
 
-            assemblyBlock.Complete();
-            var parts = await tuple.Item2;
-            return parts.Merge(new DiscoveredParts(Enumerable.Empty<ComposablePartDefinition>(), exceptions));
+            assemblyLoader.Complete();
+            var result = await tuple.Item2;
+            return result.Merge(new DiscoveredParts(Enumerable.Empty<ComposablePartDefinition>(), exceptions));
         }
 
         protected internal static string GetContractName(Type type)
@@ -333,8 +355,10 @@
             return null;
         }
 
-        private Tuple<ITargetBlock<Type>, Task<DiscoveredParts>> CreateDiscoveryBlockChain(bool typeExplicitlyRequested, CancellationToken cancellationToken)
+        private Tuple<ITargetBlock<Type>, Task<DiscoveredParts>> CreateDiscoveryBlockChain(bool typeExplicitlyRequested, IProgress<DiscoveryProgress> progress, CancellationToken cancellationToken)
         {
+            string status = Strings.ScanningMEFAssemblies;
+            int typesScanned = 0;
             var transformBlock = new TransformBlock<Type, object>(
                 type =>
                 {
@@ -344,7 +368,7 @@
                     }
                     catch (Exception ex)
                     {
-                        return ex;
+                        return new PartDiscoveryException("Unable to scan type for MEF attributes.", ex) { AssemblyPath = type.Assembly.Location, ScannedType = type };
                     }
                 },
                 new ExecutionDataflowBlockOptions
@@ -355,11 +379,12 @@
                     BoundedCapacity = 100,
                 });
             var parts = ImmutableHashSet.CreateBuilder<ComposablePartDefinition>();
-            var errors = ImmutableList.CreateBuilder<Exception>();
+            var errors = ImmutableList.CreateBuilder<PartDiscoveryException>();
             var aggregatingBlock = new ActionBlock<object>(partOrException =>
             {
                 var part = partOrException as ComposablePartDefinition;
-                var error = partOrException as Exception;
+                var error = partOrException as PartDiscoveryException;
+                Debug.Assert(partOrException is Exception == partOrException is PartDiscoveryException, "Wrong exception type returned.");
                 if (part != null)
                 {
                     parts.Add(part);
@@ -368,6 +393,8 @@
                 {
                     errors.Add(error);
                 }
+
+                progress.ReportNullSafe(new DiscoveryProgress(++typesScanned, 0, status));
             });
             transformBlock.LinkTo(aggregatingBlock, new DataflowLinkOptions { PropagateCompletion = true });
 
@@ -386,6 +413,102 @@
             });
 
             return Tuple.Create<ITargetBlock<Type>, Task<DiscoveredParts>>(transformBlock, tcs.Task);
+        }
+
+        private Tuple<ITargetBlock<Assembly>, Task<DiscoveredParts>> CreateAssemblyDiscoveryBlockChain(IProgress<DiscoveryProgress> progress, CancellationToken cancellationToken)
+        {
+            var progressFilter = new ProgressFilter(progress);
+
+            var tuple = this.CreateDiscoveryBlockChain(false, progressFilter, cancellationToken);
+            var exceptions = new List<PartDiscoveryException>();
+            var assemblyBlock = new TransformManyBlock<Assembly, Type>(
+                a =>
+                {
+                    try
+                    {
+                        // Fully realize any enumerable now so that we can catch the exception rather than
+                        // leave it to dataflow to catch it.
+                        var types = this.GetTypes(a).ToList();
+                        progressFilter.OnDiscoveredMoreTypes(types.Count);
+                        return types;
+                    }
+                    catch (Exception ex)
+                    {
+                        var partDiscoveryException = new PartDiscoveryException("Unable to enumerate types.", ex) { AssemblyPath = a.Location };
+                        lock (exceptions)
+                        {
+                            exceptions.Add(partDiscoveryException);
+                        }
+
+                        return Enumerable.Empty<Type>();
+                    }
+                },
+                new ExecutionDataflowBlockOptions
+                {
+                    MaxDegreeOfParallelism = Debugger.IsAttached ? 1 : Environment.ProcessorCount,
+                    CancellationToken = cancellationToken,
+                });
+            assemblyBlock.LinkTo(tuple.Item1, new DataflowLinkOptions { PropagateCompletion = true });
+
+            var tcs = new TaskCompletionSource<DiscoveredParts>();
+            Task.Run(async delegate
+            {
+                try
+                {
+                    var parts = await tuple.Item2;
+                    tcs.SetResult(parts.Merge(new DiscoveredParts(Enumerable.Empty<ComposablePartDefinition>(), exceptions)));
+                }
+                catch (Exception ex)
+                {
+                    tcs.SetException(ex);
+                }
+            });
+
+            return Tuple.Create<ITargetBlock<Assembly>, Task<DiscoveredParts>>(assemblyBlock, tcs.Task);
+        }
+
+        private class ProgressFilter : IProgress<DiscoveryProgress>
+        {
+            private readonly IProgress<DiscoveryProgress> upstreamReceiver;
+
+            private int totalTypes;
+
+            private DiscoveryProgress lastReportedProgress;
+
+            internal ProgressFilter(IProgress<DiscoveryProgress> upstreamReceiver)
+            {
+                this.upstreamReceiver = upstreamReceiver;
+            }
+
+            internal void OnDiscoveredMoreTypes(int count)
+            {
+                Interlocked.Add(ref this.totalTypes, count);
+            }
+
+            public void Report(DiscoveryProgress value)
+            {
+                if (this.upstreamReceiver != null)
+                {
+                    // Update with the total types we get out of band.
+                    value = new DiscoveryProgress(value.CompletedSteps, this.totalTypes, value.Status);
+
+                    bool update = false;
+                    lock (this)
+                    {
+                        // Only report progress if completion or status has changed significantly.
+                        if (Math.Abs(value.Completion - this.lastReportedProgress.Completion) > .01 || value.Status != this.lastReportedProgress.Status)
+                        {
+                            this.lastReportedProgress = value;
+                            update = true;
+                        }
+                    }
+
+                    if (update)
+                    {
+                        this.upstreamReceiver.Report(this.lastReportedProgress);
+                    }
+                }
+            }
         }
 
         private class CombinedPartDiscovery : PartDiscovery

@@ -93,7 +93,7 @@
             {
                 Requires.NotNull(writer, "writer");
                 this.writer = writer;
-                this.serializingObjectTable = new Dictionary<object, uint>();
+                this.serializingObjectTable = new Dictionary<object, uint>(SmartInterningEqualityComparer.Default);
             }
 
             [Conditional("DEBUG")]
@@ -128,7 +128,7 @@
                 {
                     this.Write(export.ContractName);
                     this.Write(export.DeclaringType);
-                    this.Write(export.Member);
+                    this.Write(export.MemberRef);
                     this.Write(export.ExportedValueType);
                     this.Write(export.Metadata);
                 }
@@ -166,10 +166,19 @@
 
                 this.Write(part.Type);
                 this.Write(part.Exports, this.Write);
-                this.Write(part.ImportingConstructor);
-                this.Write(part.ImportingConstructorArguments, this.Write);
+                if (part.ImportingConstructorRef.IsEmpty)
+                {
+                    writer.Write(false);
+                }
+                else
+                {
+                    writer.Write(true);
+                    this.Write(part.ImportingConstructorRef);
+                    this.Write(part.ImportingConstructorArguments, this.Write);
+                }
+
                 this.Write(part.ImportingMembers, this.Write);
-                this.Write(part.OnImportsSatisfied);
+                this.Write(part.OnImportsSatisfiedRef);
                 this.Write(part.SharingBoundary);
             }
 
@@ -177,10 +186,18 @@
             {
                 Trace("RuntimePart", reader.BaseStream);
 
+                ConstructorRef importingCtor = default(ConstructorRef);
+                IReadOnlyList<RuntimeComposition.RuntimeImport> importingCtorArguments = ImmutableList<RuntimeComposition.RuntimeImport>.Empty;
+
                 var type = this.ReadTypeRef();
                 var exports = this.ReadList(reader, this.ReadRuntimeExport);
-                var importingCtor = this.ReadConstructorRef();
-                var importingCtorArguments = this.ReadList(reader, this.ReadRuntimeImport);
+                bool hasCtor = reader.ReadBoolean();
+                if (hasCtor)
+                {
+                    importingCtor = this.ReadConstructorRef();
+                    importingCtorArguments = this.ReadList(reader, this.ReadRuntimeImport);
+                }
+
                 var importingMembers = this.ReadList(reader, this.ReadRuntimeImport);
                 var onImportsSatisfied = this.ReadMethodRef();
                 var sharingBoundary = this.ReadString();
@@ -207,7 +224,7 @@
                 {
                     writer.Write((byte)1);
                     this.Write(methodRef.DeclaringType);
-                    writer.Write(methodRef.MetadataToken);
+                    this.WriteCompressedMetadataToken(methodRef.MetadataToken, MetadataTokenType.Method);
                     this.Write(methodRef.GenericMethodArguments, this.Write);
                 }
             }
@@ -220,7 +237,7 @@
                 if (nullCheck == 1)
                 {
                     var declaringType = this.ReadTypeRef();
-                    var metadataToken = reader.ReadInt32();
+                    var metadataToken = this.ReadCompressedMetadataToken(MetadataTokenType.Method);
                     var genericMethodArguments = this.ReadList(reader, this.ReadTypeRef);
                     return new MethodRef(declaringType, metadataToken, genericMethodArguments.ToImmutableArray());
                 }
@@ -287,7 +304,7 @@
                 Trace("PropertyRef", writer.BaseStream);
 
                 this.Write(propertyRef.DeclaringType);
-                writer.Write(propertyRef.MetadataToken);
+                this.WriteCompressedMetadataToken(propertyRef.MetadataToken, MetadataTokenType.Property);
 
                 byte flags = 0;
                 flags |= propertyRef.GetMethodMetadataToken.HasValue ? (byte)0x1 : (byte)0x0;
@@ -296,12 +313,12 @@
 
                 if (propertyRef.GetMethodMetadataToken.HasValue)
                 {
-                    writer.Write(propertyRef.GetMethodMetadataToken.Value);
+                    this.WriteCompressedMetadataToken(propertyRef.GetMethodMetadataToken.Value, MetadataTokenType.Method);
                 }
 
                 if (propertyRef.SetMethodMetadataToken.HasValue)
                 {
-                    writer.Write(propertyRef.SetMethodMetadataToken.Value);
+                    this.WriteCompressedMetadataToken(propertyRef.SetMethodMetadataToken.Value, MetadataTokenType.Method);
                 }
             }
 
@@ -310,18 +327,18 @@
                 Trace("PropertyRef", reader.BaseStream);
 
                 var declaringType = this.ReadTypeRef();
-                var metadataToken = reader.ReadInt32();
+                var metadataToken = this.ReadCompressedMetadataToken(MetadataTokenType.Property);
 
                 byte flags = reader.ReadByte();
                 int? getter = null, setter = null;
                 if ((flags & 0x1) != 0)
                 {
-                    getter = reader.ReadInt32();
+                    getter = this.ReadCompressedMetadataToken(MetadataTokenType.Method);
                 }
 
                 if ((flags & 0x2) != 0)
                 {
-                    setter = reader.ReadInt32();
+                    setter = this.ReadCompressedMetadataToken(MetadataTokenType.Method);
                 }
 
                 return new PropertyRef(
@@ -338,8 +355,8 @@
                 writer.Write(!fieldRef.IsEmpty);
                 if (!fieldRef.IsEmpty)
                 {
-                    this.Write(fieldRef.AssemblyName);
-                    writer.Write(fieldRef.MetadataToken);
+                    this.Write(fieldRef.DeclaringType);
+                    this.WriteCompressedMetadataToken(fieldRef.MetadataToken, MetadataTokenType.Field);
                 }
             }
 
@@ -349,9 +366,9 @@
 
                 if (reader.ReadBoolean())
                 {
-                    var assemblyName = this.ReadAssemblyName();
-                    int metadataToken = reader.ReadInt32();
-                    return new FieldRef(assemblyName, metadataToken);
+                    var declaringType = this.ReadTypeRef();
+                    int metadataToken = this.ReadCompressedMetadataToken(MetadataTokenType.Field);
+                    return new FieldRef(declaringType, metadataToken);
                 }
                 else
                 {
@@ -366,8 +383,8 @@
                 writer.Write(!parameterRef.IsEmpty);
                 if (!parameterRef.IsEmpty)
                 {
-                    this.Write(parameterRef.AssemblyName);
-                    writer.Write(parameterRef.MethodMetadataToken);
+                    this.Write(parameterRef.DeclaringType);
+                    this.WriteCompressedMetadataToken(parameterRef.MethodMetadataToken, MetadataTokenType.Method);
                     writer.Write((byte)parameterRef.ParameterIndex);
                 }
             }
@@ -378,10 +395,10 @@
 
                 if (reader.ReadBoolean())
                 {
-                    var assemblyName = this.ReadAssemblyName();
-                    int metadataToken = reader.ReadInt32();
+                    var declaringType = this.ReadTypeRef();
+                    int methodMetadataToken = this.ReadCompressedMetadataToken(MetadataTokenType.Method);
                     var parameterIndex = reader.ReadByte();
-                    return new ParameterRef(assemblyName, metadataToken, parameterIndex);
+                    return new ParameterRef(declaringType, methodMetadataToken, parameterIndex);
                 }
                 else
                 {
@@ -389,11 +406,42 @@
                 }
             }
 
+            private void WriteCompressedMetadataToken(int metadataToken, MetadataTokenType type)
+            {
+                uint token = (uint)metadataToken;
+                uint flags = (uint)type;
+                Requires.Argument((token & (uint)MetadataTokenType.Mask) == flags, "type", "Wrong type"); // just a sanity check
+                this.WriteCompressedUInt(token & ~(uint)MetadataTokenType.Mask);
+            }
+
+            private int ReadCompressedMetadataToken(MetadataTokenType type)
+            {
+                return (int)(this.ReadCompressedUInt() | (uint)type);
+            }
+
+            private enum RuntimeImportFlags : byte
+            {
+                None = 0x00,
+                IsNonSharedInstanceRequired = 0x01,
+                IsExportFactory = 0x02,
+                CardinalityExactlyOne = 0x04,
+                CardinalityOneOrZero = 0x08,
+                IsParameter = 0x10,
+            }
+
             private void Write(RuntimeComposition.RuntimeImport import)
             {
                 Trace("RuntimeImport", writer.BaseStream);
 
-                writer.Write(import.ImportingMemberRef.IsEmpty ? (byte)2 : (byte)1);
+                RuntimeImportFlags flags = RuntimeImportFlags.None;
+                flags |= import.ImportingMemberRef.IsEmpty ? RuntimeImportFlags.IsParameter : 0;
+                flags |= import.IsNonSharedInstanceRequired ? RuntimeImportFlags.IsNonSharedInstanceRequired : 0;
+                flags |= import.IsExportFactory ? RuntimeImportFlags.IsExportFactory : 0;
+                flags |=
+                    import.Cardinality == ImportCardinality.ExactlyOne ? RuntimeImportFlags.CardinalityExactlyOne :
+                    import.Cardinality == ImportCardinality.OneOrZero ? RuntimeImportFlags.CardinalityOneOrZero : 0;
+                writer.Write((byte)flags);
+
                 if (import.ImportingMemberRef.IsEmpty)
                 {
                     this.Write(import.ImportingParameterRef);
@@ -403,65 +451,72 @@
                     this.Write(import.ImportingMemberRef);
                 }
 
-                this.Write(import.Cardinality);
+                this.Write(import.ImportingSiteTypeRef);
                 this.Write(import.SatisfyingExports, this.Write);
-                writer.Write(import.IsNonSharedInstanceRequired);
                 this.Write(import.Metadata);
-                this.Write(import.ExportFactory);
-                this.Write(import.ExportFactorySharingBoundaries, this.Write);
+                if (import.IsExportFactory)
+                {
+                    this.Write(import.ExportFactorySharingBoundaries, this.Write);
+                }
             }
 
             private RuntimeComposition.RuntimeImport ReadRuntimeImport()
             {
                 Trace("RuntimeImport", reader.BaseStream);
 
-                byte kind = reader.ReadByte();
+                var flags = (RuntimeImportFlags)reader.ReadByte();
+                var cardinality =
+                    flags.HasFlag(RuntimeImportFlags.CardinalityOneOrZero) ? ImportCardinality.OneOrZero :
+                    flags.HasFlag(RuntimeImportFlags.CardinalityExactlyOne) ? ImportCardinality.ExactlyOne :
+                    ImportCardinality.ZeroOrMore;
+                bool isExportFactory = flags.HasFlag(RuntimeImportFlags.IsExportFactory);
+
                 MemberRef importingMember = default(MemberRef);
                 ParameterRef importingParameter = default(ParameterRef);
-                switch (kind)
+                if (flags.HasFlag(RuntimeImportFlags.IsParameter))
                 {
-                    case 1:
-                        importingMember = this.ReadMemberRef();
-                        break;
-                    case 2:
-                        importingParameter = this.ReadParameterRef();
-                        break;
-                    default:
-                        throw new NotSupportedException();
+                    importingParameter = this.ReadParameterRef();
+                }
+                else
+                {
+                    importingMember = this.ReadMemberRef();
                 }
 
-                var cardinality = this.ReadImportCardinality();
+                var importingSiteTypeRef = this.ReadTypeRef();
                 var satisfyingExports = this.ReadList(reader, this.ReadRuntimeExport);
-                bool isNonSharedInstanceRequired = reader.ReadBoolean();
                 var metadata = this.ReadMetadata();
-                var exportFactory = this.ReadTypeRef();
-                var exportFactorySharingBoundaries = this.ReadList(reader, this.ReadString);
+                IReadOnlyList<string> exportFactorySharingBoundaries = isExportFactory
+                    ? this.ReadList(reader, this.ReadString)
+                    : ImmutableList<string>.Empty;
 
                 return importingMember.IsEmpty
                     ? new RuntimeComposition.RuntimeImport(
                         importingParameter,
+                        importingSiteTypeRef,
                         cardinality,
                         satisfyingExports,
-                        isNonSharedInstanceRequired,
+                        flags.HasFlag(RuntimeImportFlags.IsNonSharedInstanceRequired),
+                        isExportFactory,
                         metadata,
-                        exportFactory,
                         exportFactorySharingBoundaries)
                     : new RuntimeComposition.RuntimeImport(
                         importingMember,
+                        importingSiteTypeRef,
                         cardinality,
                         satisfyingExports,
-                        isNonSharedInstanceRequired,
+                        flags.HasFlag(RuntimeImportFlags.IsNonSharedInstanceRequired),
+                        isExportFactory,
                         metadata,
-                        exportFactory,
                         exportFactorySharingBoundaries);
             }
 
             private void Write(ConstructorRef constructorRef)
             {
+                Requires.Argument(!constructorRef.IsEmpty, "constructorRef", "Cannot be empty.");
                 Trace("ConstructorRef", writer.BaseStream);
 
                 this.Write(constructorRef.DeclaringType);
-                writer.Write(constructorRef.MetadataToken);
+                this.WriteCompressedMetadataToken(constructorRef.MetadataToken, MetadataTokenType.Method);
             }
 
             private ConstructorRef ReadConstructorRef()
@@ -469,7 +524,7 @@
                 Trace("ConstructorRef", reader.BaseStream);
 
                 var declaringType = this.ReadTypeRef();
-                var metadataToken = reader.ReadInt32();
+                var metadataToken = this.ReadCompressedMetadataToken(MetadataTokenType.Method);
 
                 return new ConstructorRef(
                     declaringType,
@@ -483,7 +538,7 @@
                 if (this.TryPrepareSerializeReusableObject(typeRef))
                 {
                     this.Write(typeRef.AssemblyName);
-                    writer.Write(typeRef.MetadataToken);
+                    this.WriteCompressedMetadataToken(typeRef.MetadataToken, MetadataTokenType.Type);
                     writer.Write(typeRef.IsArray);
                     writer.Write((byte)typeRef.GenericTypeParameterCount);
                     this.Write(typeRef.GenericTypeArguments, this.Write);
@@ -499,7 +554,7 @@
                 if (this.TryPrepareDeserializeReusableObject(out id, out value))
                 {
                     var assemblyName = this.ReadAssemblyName();
-                    var metadataToken = reader.ReadInt32();
+                    var metadataToken = this.ReadCompressedMetadataToken(MetadataTokenType.Type);
                     bool isArray = reader.ReadBoolean();
                     int genericTypeParameterCount = reader.ReadByte();
                     var genericTypeArguments = this.ReadList(reader, this.ReadTypeRef);
@@ -514,20 +569,28 @@
             {
                 Trace("AssemblyName", writer.BaseStream);
 
-                this.Write(assemblyName.FullName);
-                this.Write(assemblyName.CodeBase);
+                if (this.TryPrepareSerializeReusableObject(assemblyName))
+                {
+                    this.Write(assemblyName.FullName);
+                    this.Write(assemblyName.CodeBase);
+                }
             }
 
             private AssemblyName ReadAssemblyName()
             {
                 Trace("AssemblyName", reader.BaseStream);
 
-                string fullName = this.ReadString();
-                string codeBase = this.ReadString();
-                return new AssemblyName(fullName)
+                uint id;
+                AssemblyName value;
+                if (this.TryPrepareDeserializeReusableObject(out id, out value))
                 {
-                    CodeBase = codeBase,
-                };
+                    string fullName = this.ReadString();
+                    string codeBase = this.ReadString();
+                    value = new AssemblyName(fullName) { CodeBase = codeBase };
+                    this.OnDeserializedReusableObject(id, value);
+                }
+
+                return value;
             }
 
             private void Write(string value)
@@ -619,21 +682,6 @@
             private void OnDeserializedReusableObject(uint id, object value)
             {
                 this.deserializingObjectTable.Add(id, value);
-            }
-
-            private void Write(Assembly assembly)
-            {
-                Trace("Assembly", writer.BaseStream);
-
-                this.Write(assembly.FullName);
-            }
-
-            private Assembly ReadAssembly()
-            {
-                Trace("Assembly", reader.BaseStream);
-
-                string assemblyName = this.ReadString();
-                return Assembly.Load(assemblyName);
             }
 
             private void Write<T>(IReadOnlyCollection<T> list, Action<T> itemWriter)
@@ -775,6 +823,11 @@
                 Array,
                 BinaryFormattedObject,
                 TypeRef,
+                BoolTrue,
+                BoolFalse,
+                Int32,
+                Char,
+                Guid,
             }
 
             private void WriteObject(object value)
@@ -795,10 +848,29 @@
                         this.Write(TypeRef.Get(valueType.GetElementType()));
                         this.Write(array, this.WriteObject);
                     }
+                    else if (valueType == typeof(bool))
+                    {
+                        this.Write((bool)value ? ObjectType.BoolTrue : ObjectType.BoolFalse);
+                    }
                     else if (valueType == typeof(string))
                     {
                         this.Write(ObjectType.String);
                         this.Write((string)value);
+                    }
+                    else if (valueType == typeof(int))
+                    {
+                        this.Write(ObjectType.Int32);
+                        writer.Write((int)value);
+                    }
+                    else if (valueType == typeof(char))
+                    {
+                        this.Write(ObjectType.Char);
+                        writer.Write((char)value);
+                    }
+                    else if (valueType == typeof(Guid))
+                    {
+                        this.Write(ObjectType.Guid);
+                        writer.Write(((Guid)value).ToByteArray());
                     }
                     else if (valueType == typeof(CreationPolicy)) // TODO: how do we handle arbitrary value types?
                     {
@@ -817,6 +889,7 @@
                     }
                     else
                     {
+                        Debug.WriteLine("Falling back to binary formatter for value of type: {0}", valueType);
                         this.Write(ObjectType.BinaryFormattedObject);
                         var formatter = new BinaryFormatter();
                         writer.Flush();
@@ -836,8 +909,18 @@
                     case ObjectType.Array:
                         Type elementType = this.ReadTypeRef().Resolve();
                         return this.ReadArray(reader, this.ReadObject, elementType);
+                    case ObjectType.BoolTrue:
+                        return true;
+                    case ObjectType.BoolFalse:
+                        return false;
+                    case ObjectType.Int32:
+                        return reader.ReadInt32();
                     case ObjectType.String:
                         return this.ReadString();
+                    case ObjectType.Char:
+                        return reader.ReadChar();
+                    case ObjectType.Guid:
+                        return new Guid(reader.ReadBytes(16));
                     case ObjectType.CreationPolicy:
                         return (CreationPolicy)reader.ReadByte();
                     case ObjectType.Type:
@@ -861,6 +944,38 @@
             {
                 var objectType = (ObjectType)reader.ReadByte();
                 return objectType;
+            }
+
+            /// <summary>
+            /// An equality comparer that provides a bit better recognition of objects for better interning.
+            /// </summary>
+            private class SmartInterningEqualityComparer : IEqualityComparer<object>
+            {
+                internal static readonly IEqualityComparer<object> Default = new SmartInterningEqualityComparer();
+
+                private static readonly IEqualityComparer<object> Fallback = EqualityComparer<object>.Default;
+
+                private SmartInterningEqualityComparer() { }
+
+                new public bool Equals(object x, object y)
+                {
+                    if (x is AssemblyName && y is AssemblyName)
+                    {
+                        return ByValueEquality.AssemblyName.Equals((AssemblyName)x, (AssemblyName)y);
+                    }
+
+                    return Fallback.Equals(x, y);
+                }
+
+                public int GetHashCode(object obj)
+                {
+                    if (obj is AssemblyName)
+                    {
+                        return ByValueEquality.AssemblyName.GetHashCode((AssemblyName)obj);
+                    }
+
+                    return Fallback.GetHashCode(obj);
+                }
             }
         }
     }

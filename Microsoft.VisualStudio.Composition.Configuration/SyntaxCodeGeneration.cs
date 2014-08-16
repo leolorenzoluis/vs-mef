@@ -13,6 +13,7 @@
     using Microsoft.CodeAnalysis;
     using Microsoft.CodeAnalysis.CSharp;
     using Microsoft.CodeAnalysis.CSharp.Syntax;
+    using Microsoft.VisualStudio.Composition.Reflection;
     using Validation;
 
     internal class SyntaxCodeGeneration
@@ -30,16 +31,26 @@
 
         private const string InstantiatedPartLocalVarName = "result";
 
-        private static readonly TypeSyntax dictionaryOfIntObject = SyntaxFactory.GenericName("Dictionary")
+        private static readonly IdentifierNameSyntax TypeRefsArrayFieldName = SyntaxFactory.IdentifierName("typeRefs");
+
+        private static readonly IdentifierNameSyntax ExportProviderIdentifierName = SyntaxFactory.IdentifierName("ExportProvider");
+
+        private static readonly IdentifierNameSyntax ExportProviderBaseIdentifierName = SyntaxFactory.IdentifierName("CodeGenExportProviderBase");
+
+        private static readonly IdentifierNameSyntax TypeRefIdentifierName = SyntaxFactory.IdentifierName("TypeRef");
+
+        private static readonly TypeSyntax dictionaryOfTypeRefObject = SyntaxFactory.GenericName("Dictionary")
                     .WithTypeArgumentList(SyntaxFactory.TypeArgumentList(CodeGen.JoinSyntaxNodes<TypeSyntax>(
                         SyntaxKind.CommaToken,
-                        SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.IntKeyword)),
+                        TypeRefIdentifierName,
                         SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.ObjectKeyword)))));
 
-        private static readonly ObjectCreationExpressionSyntax newDictionaryOfTypeObjectExpression =
-            SyntaxFactory.ObjectCreationExpression(dictionaryOfIntObject, SyntaxFactory.ArgumentList(), null);
+        private static readonly ObjectCreationExpressionSyntax newDictionaryOfTypeRefObjectExpression =
+            SyntaxFactory.ObjectCreationExpression(dictionaryOfTypeRefObject, SyntaxFactory.ArgumentList(), null);
 
         private static readonly LiteralExpressionSyntax NullSyntax = SyntaxFactory.LiteralExpression(SyntaxKind.NullLiteralExpression);
+
+        private static readonly TypeSyntax FuncOfObjectTypeSyntax = SyntaxFactory.GenericName("Func").AddTypeArgumentListArguments(SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.ObjectKeyword)));
 
         private readonly HashSet<Assembly> relevantAssemblies = new HashSet<Assembly>();
 
@@ -150,7 +161,7 @@
                 SyntaxFactory.SingletonList<StatementSyntax>(SyntaxFactory.ReturnStatement(
                     SyntaxFactory.MemberAccessExpression(
                         SyntaxKind.SimpleMemberAccessExpression,
-                        this.GetTypeNameSyntax(typeof(ImmutableList<Export>)),
+                        SyntaxFactory.ParseName("ImmutableList<ExportInfo>"),
                         SyntaxFactory.IdentifierName("Empty"))))));
 
             var contractName = SyntaxFactory.MemberAccessExpression(
@@ -161,9 +172,9 @@
             var body = SyntaxFactory.Block(
                 SyntaxFactory.SwitchStatement(contractName, SyntaxFactory.List(switchSections)));
 
-            // protected override IEnumerable<Export> GetExportsCore7(ImportDefinition importDefinition)
+            // protected override IEnumerable<ExportInfo> GetExportsCore7(ImportDefinition importDefinition)
             var method = SyntaxFactory.MethodDeclaration(
-                this.GetTypeNameSyntax(typeof(IEnumerable<Export>)),
+                SyntaxFactory.ParseName("IEnumerable<ExportInfo>"),
                 "GetExportsCore" + bucket)
                 .AddParameterListParameters(
                     SyntaxFactory.Parameter(importDefinition.Identifier).WithType(this.GetTypeNameSyntax(typeof(ImportDefinition))))
@@ -238,15 +249,15 @@
                 SyntaxFactory.SingletonList<StatementSyntax>(SyntaxFactory.ReturnStatement(
                     SyntaxFactory.MemberAccessExpression(
                         SyntaxKind.SimpleMemberAccessExpression,
-                        this.GetTypeNameSyntax(typeof(ImmutableList<Export>)),
+                        SyntaxFactory.ParseName("ImmutableList<ExportInfo>"),
                         SyntaxFactory.IdentifierName("Empty"))))));
 
             var body = SyntaxFactory.Block(
                 SyntaxFactory.SwitchStatement(contractNameBucket, SyntaxFactory.List(switchSections)));
 
-            // protected override IEnumerable<Export> GetExportsCore(ImportDefinition importDefinition)
+            // protected override IEnumerable<ExportInfo> GetExportsCore(ImportDefinition importDefinition)
             var method = SyntaxFactory.MethodDeclaration(
-                this.GetTypeNameSyntax(typeof(IEnumerable<Export>)),
+                SyntaxFactory.ParseName("IEnumerable<ExportInfo>"),
                 "GetExportsCore")
                 .AddParameterListParameters(
                     SyntaxFactory.Parameter(importDefinition.Identifier).WithType(this.GetTypeNameSyntax(typeof(ImportDefinition))))
@@ -281,12 +292,12 @@
             var parentIdentifier = SyntaxFactory.IdentifierName("parent");
             var freshSharingBoundaries = SyntaxFactory.IdentifierName("freshSharingBoundaries");
 
-            // public CompiledExportProvider(ExportProvider parent, string[] freshSharingBoundaries) 
+            // public CompiledExportProvider(CodeGenExportProviderBase parent, string[] freshSharingBoundaries) 
             //    : base(parent, freshSharingBoundaries)
             return SyntaxFactory.ConstructorDeclaration(CompiledExportProviderTypeName)
                 .AddModifiers(SyntaxFactory.Token(SyntaxKind.PublicKeyword))
                 .AddParameterListParameters(
-                    SyntaxFactory.Parameter(parentIdentifier.Identifier).WithType(this.GetTypeNameSyntax(typeof(ExportProvider))),
+                    SyntaxFactory.Parameter(parentIdentifier.Identifier).WithType(ExportProviderBaseIdentifierName),
                     SyntaxFactory.Parameter(freshSharingBoundaries.Identifier).WithType(this.GetTypeNameSyntax(typeof(string[]))))
                 .WithInitializer(
                     SyntaxFactory.ConstructorInitializer(
@@ -340,17 +351,14 @@
                             this.GetTypeNameSyntax(typeof(Module)),
                             SyntaxFactory.SingletonList(SyntaxFactory.ArrayRankSpecifier(SyntaxFactory.SingletonSeparatedList<ExpressionSyntax>(
                                 SyntaxFactory.LiteralExpression(SyntaxKind.NumericLiteralExpression, SyntaxFactory.Literal(this.reflectionLoadedAssemblies.Count))))))))),
-                // this.cachedTypes = new Type[<#= reflectionLoadedTypes.Count #>];
+                // this.typeRefs = new TypeRef[<#= reflectionLoadedTypes.Count #>];
                     SyntaxFactory.ExpressionStatement(SyntaxFactory.BinaryExpression(
                         SyntaxKind.SimpleAssignmentExpression,
                         SyntaxFactory.MemberAccessExpression(
                             SyntaxKind.SimpleMemberAccessExpression,
                             SyntaxFactory.ThisExpression(),
-                            SyntaxFactory.IdentifierName("cachedTypes")),
-                        SyntaxFactory.ArrayCreationExpression(SyntaxFactory.ArrayType(
-                            this.GetTypeNameSyntax(typeof(Type)),
-                            SyntaxFactory.SingletonList(SyntaxFactory.ArrayRankSpecifier(SyntaxFactory.SingletonSeparatedList<ExpressionSyntax>(
-                                SyntaxFactory.LiteralExpression(SyntaxKind.NumericLiteralExpression, SyntaxFactory.Literal(this.reflectionLoadedTypes.Count)))))))))));
+                            TypeRefsArrayFieldName),
+                        GetSyntaxToReconstructValue(this.reflectionLoadedTypes.Select(TypeRef.Get).ToArray(), SyntaxFactory.ThisExpression())))));
         }
 
         internal CompilationUnitSyntax CreateSourceFile()
@@ -377,14 +385,12 @@
             var compiledExportProviderType = SyntaxFactory.ClassDeclaration(CompiledExportProviderTypeName)
                 .WithModifiers(SyntaxFactory.TokenList(SyntaxFactory.Token(SyntaxKind.InternalKeyword)))
                 .WithBaseList(SyntaxFactory.BaseList(SyntaxFactory.SingletonSeparatedList<TypeSyntax>(
-                    SyntaxFactory.IdentifierName("ExportProvider"))))
+                    ExportProviderBaseIdentifierName)))
                 .AddMembers(partFactoryNestedTypes.ToArray())
                 .AddMembers(getExportsCoreHelperNestedTypes.ToArray())
                 .AddMembers(this.GetMetadataViewInterfaces().Select(CreateMetadataViewClass).ToArray())
                 .AddMembers(this.CreateGetExportsCoreMethod())
                 .AddMembers(
-                    this.CreateGetTypeIdCoreMethod(),
-                    this.CreateGetTypeCoreMethod(),
                     this.CreateDefaultConstructor(),
                     this.CreateScopingConstructor())
                 .AddMembers(this.extraMembers.ToArray());
@@ -400,6 +406,7 @@
                     SyntaxFactory.UsingDirective(SyntaxFactory.ParseName("System.Reflection")),
                     SyntaxFactory.UsingDirective(SyntaxFactory.ParseName("Microsoft.VisualStudio")),
                     SyntaxFactory.UsingDirective(SyntaxFactory.ParseName("Microsoft.VisualStudio.Composition")),
+                    SyntaxFactory.UsingDirective(SyntaxFactory.ParseName("Microsoft.VisualStudio.Composition.Reflection")),
                     SyntaxFactory.UsingDirective(SyntaxFactory.NameEquals("CompositionFailedException"), SyntaxFactory.ParseName("Microsoft.VisualStudio.Composition.CompositionFailedException")),
                     }))
                 .WithMembers(SyntaxFactory.SingletonList<MemberDeclarationSyntax>(compiledExportProviderType));
@@ -1051,34 +1058,13 @@
             {
                 substitutionRequired = true;
 
-                // new TypeRef(15)
-                return SyntaxFactory.ObjectCreationExpression(
-                    SyntaxFactory.IdentifierName("TypeRef"),
-                    SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(this.GetTypeIdSyntax((Type)value)))),
-                    null);
+                return this.GetSyntaxToReconstructValue(TypeRef.Get((Type)value), thisExportProvider);
             }
             else if (value is Type[])
             {
-                var valueAsTypeArray = (Type[])value;
                 substitutionRequired = true;
-                var typeRefs = new ExpressionSyntax[valueAsTypeArray.Length];
-                for (int i = 0; i < valueAsTypeArray.Length; i++)
-                {
-                    typeRefs[i] = GetSyntaxToReconstructValueWithTypeRefSubstitution(valueAsTypeArray[i], thisExportProvider, out substitutionRequired);
-                }
-
-                // new TypeRef[] { new TypeRef(15), new TypeRef(18) }
-                return SyntaxFactory.ArrayCreationExpression(
-                    SyntaxFactory.ArrayType(SyntaxFactory.IdentifierName("TypeRef"))
-                        .WithRankSpecifiers(
-                            SyntaxFactory.SingletonList(
-                            SyntaxFactory.ArrayRankSpecifier(
-                                SyntaxFactory.SingletonSeparatedList<ExpressionSyntax>(
-                                    SyntaxFactory.OmittedArraySizeExpression())))),
-                    SyntaxFactory.InitializerExpression(
-                        SyntaxKind.ArrayInitializerExpression,
-                        SyntaxFactory.SeparatedList<ExpressionSyntax>(typeRefs)))
-                    .WithNewKeywordTrivia();
+                var valueAsTypeArray = (Type[])value;
+                return this.GetSyntaxToReconstructValue(valueAsTypeArray.Select(TypeRef.Get).ToArray(), thisExportProvider);
             }
             else
             {
@@ -1179,6 +1165,35 @@
                             SyntaxFactory.Argument(underlyingTypeValue))));
                 }
             }
+            else if (typeof(AssemblyName).IsAssignableFrom(valueType))
+            {
+                // new AssemblyName("assemblyname, version=,...")
+                AssemblyName valueAssemblyName = (AssemblyName)value;
+                return SyntaxFactory.ObjectCreationExpression(
+                    this.GetTypeNameSyntax(typeof(AssemblyName)),
+                    SyntaxFactory.ArgumentList(
+                        SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(
+                            SyntaxFactory.LiteralExpression(SyntaxKind.StringLiteralExpression, SyntaxFactory.Literal(valueAssemblyName.FullName))))),
+                    null);
+            }
+            else if (typeof(TypeRef).IsAssignableFrom(valueType))
+            {
+                // TypeRef.Get(valueTypeRef.AssemblyName, valueTypeRef.MetadataToken, valueTypeRef.IsArray, valueTypeRef.GenericTypeParameterCount, valueTypeRef.GenericTypeArguments)
+                TypeRef valueTypeRef = (TypeRef)value;
+                return SyntaxFactory.InvocationExpression(
+                    SyntaxFactory.MemberAccessExpression(
+                        SyntaxKind.SimpleMemberAccessExpression,
+                        TypeRefIdentifierName,
+                        SyntaxFactory.IdentifierName("Get")),
+                    SyntaxFactory.ArgumentList(
+                        CodeGen.JoinSyntaxNodes(
+                            SyntaxKind.CommaToken,
+                            SyntaxFactory.Argument(GetSyntaxToReconstructValue(valueTypeRef.AssemblyName, thisExportProvider)),
+                            SyntaxFactory.Argument(GetSyntaxToReconstructValue(valueTypeRef.MetadataToken, thisExportProvider)),
+                            SyntaxFactory.Argument(GetSyntaxToReconstructValue(valueTypeRef.IsArray, thisExportProvider)),
+                            SyntaxFactory.Argument(GetSyntaxToReconstructValue(valueTypeRef.GenericTypeParameterCount, thisExportProvider)),
+                            SyntaxFactory.Argument(GetSyntaxToReconstructValue(valueTypeRef.GenericTypeArguments, thisExportProvider)))));
+            }
             else if (typeof(Type).IsAssignableFrom(valueType))
             {
                 // assumeNonPublic=true because typeof() would result in the JIT compiler
@@ -1187,6 +1202,46 @@
                 return SyntaxFactory.CastExpression(
                     GetTypeNameSyntax(valueType), // Cast as TypeInfo to avoid some compilation errors.
                     SyntaxFactory.ParseExpression(GetTypeExpression((Type)value, thisExportProvider, assumeNonPublic: true)));
+            }
+            else if (valueType.IsGenericType && typeof(ImmutableArray<>).IsAssignableFrom(valueType.GetGenericTypeDefinition()) && IsPublic(valueType, true))
+            {
+                var enumerableValue = ((System.Collections.IEnumerable)value).Cast<object>();
+                if (enumerableValue.Any())
+                {
+                    // ImmutableArray.CreateRange<T>(new [] { .. .. .. } )
+                    var array = SyntaxFactory.ArrayCreationExpression(
+                        SyntaxFactory.ArrayType(GetTypeNameSyntax(valueType.GetGenericArguments()[0]))
+                            .WithRankSpecifiers(
+                                SyntaxFactory.SingletonList(
+                                SyntaxFactory.ArrayRankSpecifier(
+                                    SyntaxFactory.SingletonSeparatedList<ExpressionSyntax>(
+                                        SyntaxFactory.OmittedArraySizeExpression())))),
+                        SyntaxFactory.InitializerExpression(
+                            SyntaxKind.ArrayInitializerExpression,
+                            SyntaxFactory.SeparatedList<ExpressionSyntax>(
+                                ((System.Collections.IEnumerable)value).Cast<object>().Select(v => GetSyntaxToReconstructValue(v, thisExportProvider)))))
+                        .WithNewKeywordTrivia();
+
+                    var immutableArrayTypeSyntax = this.GetTypeSyntax(valueType, thisExportProvider);
+                    return SyntaxFactory.InvocationExpression(
+                        SyntaxFactory.MemberAccessExpression(
+                            SyntaxKind.SimpleMemberAccessExpression,
+                            SyntaxFactory.IdentifierName("ImmutableArray"),
+                            SyntaxFactory.GenericName("CreateRange")
+                                .AddTypeArgumentListArguments(this.GetTypeNameSyntax(valueType.GetGenericArguments()[0]))),
+                        SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(
+                            SyntaxFactory.Argument(array))));
+                }
+                else
+                {
+                    return SyntaxFactory.InvocationExpression(
+                        SyntaxFactory.MemberAccessExpression(
+                            SyntaxKind.SimpleMemberAccessExpression,
+                            SyntaxFactory.IdentifierName("ImmutableArray"),
+                            SyntaxFactory.GenericName("Create")
+                                .AddTypeArgumentListArguments(this.GetTypeNameSyntax(valueType.GetGenericArguments()[0]))),
+                        SyntaxFactory.ArgumentList());
+                }
             }
             else if (valueType.IsArray)
             {
@@ -1205,7 +1260,7 @@
                     .WithNewKeywordTrivia();
             }
 
-            throw new NotSupportedException();
+            throw new NotSupportedException("Type " + valueType.Name + " is not supported.");
         }
 
         private TypeSyntax GetTypeNameSyntax(Type type, bool genericTypeDefinition = false, bool evenNonPublic = false)
@@ -1347,8 +1402,8 @@
                     SyntaxFactory.Token(SyntaxKind.InternalKeyword),
                     SyntaxFactory.Token(SyntaxKind.StaticKeyword))
                 .AddParameterListParameters(
-                    SyntaxFactory.Parameter(thisExportProviderIdentifier.Identifier).WithType(SyntaxFactory.IdentifierName("ExportProvider")),
-                    SyntaxFactory.Parameter(provisionalSharedObjectsIdentifier.Identifier).WithType(dictionaryOfIntObject));
+                    SyntaxFactory.Parameter(thisExportProviderIdentifier.Identifier).WithType(ExportProviderIdentifierName),
+                    SyntaxFactory.Parameter(provisionalSharedObjectsIdentifier.Identifier).WithType(dictionaryOfTypeRefObject));
 
             var statements = new List<StatementSyntax>();
             if (part.Definition.IsInstantiable)
@@ -1421,11 +1476,16 @@
                         ? (ExpressionSyntax)SyntaxFactory.InvocationExpression(
                             SyntaxFactory.MemberAccessExpression(
                                 SyntaxKind.SimpleMemberAccessExpression,
-                                thisExportProvider,
-                                SyntaxFactory.IdentifierName("GetTypeId")),
+                                SyntaxFactory.IdentifierName("TypeRef"),
+                                SyntaxFactory.IdentifierName("Get")),
                             SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(
-                                partInstanceIdentifier))))
-                        : this.GetTypeIdSyntax(part.Definition.Type);
+                                SyntaxFactory.InvocationExpression(
+                                    SyntaxFactory.MemberAccessExpression(
+                                        SyntaxKind.SimpleMemberAccessExpression,
+                                        partInstanceIdentifier,
+                                        SyntaxFactory.IdentifierName("GetType")),
+                                    SyntaxFactory.ArgumentList())))))
+                        : this.GetTypeRefSyntax(part.Definition.Type, thisExportProvider);
 
                     // provisionalSharedObjects.Add(partTypeId, result);
                     statements.Add(SyntaxFactory.ExpressionStatement(SyntaxFactory.InvocationExpression(
@@ -1548,7 +1608,7 @@
                 scope = thisExportProvider;
             }
 
-            // ILazy<object> part = GetOrCreateShareableValue(typeof(Part), ...);
+            // Func<object> part = GetOrCreateShareableValue(typeof(Part), ...);
             Type[] typeArgs = import.ImportingSiteElementType.GetGenericArguments();
             var partLocalVar = SyntaxFactory.IdentifierName("part");
             statements.Add(
@@ -1558,9 +1618,9 @@
                         SyntaxFactory.SingletonSeparatedList(
                             SyntaxFactory.VariableDeclarator(partLocalVar.Identifier)
                                 .WithInitializer(SyntaxFactory.EqualsValueClause(
-                                    GetPartInstanceLazy(export.PartDefinition, newDictionaryOfTypeObjectExpression, false, typeArgs, scope)))))));
+                                    GetPartInstanceFactory(export.PartDefinition, newDictionaryOfTypeRefObjectExpression, false, typeArgs, scope)))))));
 
-            // var value = part.Value.SomeMember;
+            // var value = part().SomeMember;
             var exportedValueLocalVar = SyntaxFactory.IdentifierName("value");
             statements.Add(
                 SyntaxFactory.LocalDeclarationStatement(
@@ -1580,7 +1640,7 @@
             {
                 disposeReceiver = SyntaxFactory.ParenthesizedExpression(SyntaxFactory.CastExpression(
                     SyntaxFactory.IdentifierName("IDisposable"),
-                    SyntaxFactory.MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, partLocalVar, SyntaxFactory.IdentifierName("Value"))));
+                    SyntaxFactory.InvocationExpression(partLocalVar, SyntaxFactory.ArgumentList())));
             }
 
             ExpressionSyntax disposeAction = disposeReceiver != null
@@ -1614,15 +1674,7 @@
             {
                 // Since we'll be using reflection to pass in the tuple factory, we have to
                 // explicitly give the lambda a delegate shape or the C# compiler won't know what to do with it.
-                var tupleFactoryDelegate = SyntaxFactory.InvocationExpression(
-                    SyntaxFactory.MemberAccessExpression(
-                        SyntaxKind.SimpleMemberAccessExpression,
-                        SyntaxFactory.IdentifierName("ReflectionHelpers"),
-                        SyntaxFactory.IdentifierName("CreateFuncOfType")),
-                    SyntaxFactory.ArgumentList(CodeGen.JoinSyntaxNodes(
-                        SyntaxKind.CommaToken,
-                        SyntaxFactory.Argument(this.GetTypeExpressionSyntax(tupleType, thisExportProvider)),
-                        SyntaxFactory.Argument(tupleFactoryLambda))));
+                var tupleFactoryDelegate = CreateFuncOfType(tupleFactoryLambda, this.GetTypeExpressionSyntax(tupleType, thisExportProvider));
                 exportFactoryCtorArguments.Add(tupleFactoryDelegate);
             }
 
@@ -1636,6 +1688,75 @@
                 import.ExportFactoryType.GetConstructors().Single(),
                 exportFactoryCtorArguments.ToArray(),
                 thisExportProvider);
+        }
+
+        private ExpressionSyntax CreateFuncOfType(ExpressionSyntax funcOfObject, Type returnType, ExpressionSyntax thisExportProvider)
+        {
+            return IsPublic(returnType, true)
+                ? CreateFuncOfType(funcOfObject, this.GetTypeNameSyntax(returnType))
+                : CreateFuncOfType(funcOfObject, this.GetTypeExpressionSyntax(returnType, thisExportProvider));
+        }
+
+        /// <summary>
+        /// Returns a Func{T} expression given a Func{object} expression
+        /// when T is non-public.
+        /// </summary>
+        /// <param name="funcOfObject">The Func{object} expression.</param>
+        /// <param name="returnTypeSyntax">The syntax that produces T as a type (not a type expression). T must be public.</param>
+        private static ExpressionSyntax CreateFuncOfType(ExpressionSyntax funcOfObject, TypeSyntax returnTypeSyntax)
+        {
+            Requires.NotNull(funcOfObject, "funcOfObject");
+            Requires.NotNull(returnTypeSyntax, "returnTypeSyntax");
+
+            ExpressionSyntax valueFactoryInput;
+            if (funcOfObject is ParenthesizedLambdaExpressionSyntax)
+            {
+                // Strip off the lambda to avoid compile errors for trying to directly invoke a lambda.
+                valueFactoryInput = (ExpressionSyntax)((ParenthesizedLambdaExpressionSyntax)funcOfObject).Body;
+            }
+            else
+            {
+                // Invoke the function.
+                valueFactoryInput = SyntaxFactory.InvocationExpression(funcOfObject, SyntaxFactory.ArgumentList());
+            }
+
+            // We must cast the result of the value factory.
+            //   () => (T)(valueFactory())
+            var adaptedValueFactory = SyntaxFactory.ParenthesizedLambdaExpression(
+                SyntaxFactory.CastExpression(returnTypeSyntax, valueFactoryInput));
+
+            // And be sure we actually create a delegate so that when the result goes into a reflection Invoke call,
+            // we don't get a compiler error about the compiler not knowing what type of delegate to create.
+            var funcOfTExpression = SyntaxFactory.ObjectCreationExpression(
+                SyntaxFactory.GenericName("Func").AddTypeArgumentListArguments(returnTypeSyntax),
+                SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(adaptedValueFactory))),
+                null);
+
+            return funcOfTExpression;
+        }
+
+        /// <summary>
+        /// Returns a Func{T} expression given a Func{object} expression
+        /// when T is non-public.
+        /// </summary>
+        /// <param name="funcOfObject">The Func{object} expression.</param>
+        /// <param name="typeExpressionSyntax">The expression that describes the T in Func{T}.</param>
+        private static ExpressionSyntax CreateFuncOfType(ExpressionSyntax funcOfObject, ExpressionSyntax typeExpressionSyntax)
+        {
+            Requires.NotNull(funcOfObject, "funcOfObject");
+            Requires.NotNull(typeExpressionSyntax, "typeExpressionSyntax");
+
+            var funcOfTExpression = SyntaxFactory.InvocationExpression(
+                SyntaxFactory.MemberAccessExpression(
+                    SyntaxKind.SimpleMemberAccessExpression,
+                    SyntaxFactory.IdentifierName("ReflectionHelpers"),
+                    SyntaxFactory.IdentifierName("CreateFuncOfType")),
+                SyntaxFactory.ArgumentList(CodeGen.JoinSyntaxNodes(
+                    SyntaxKind.CommaToken,
+                    SyntaxFactory.Argument(typeExpressionSyntax),
+                    SyntaxFactory.Argument(funcOfObject))));
+
+            return funcOfTExpression;
         }
 
         private enum ValueFactoryType
@@ -1661,7 +1782,7 @@
                             // new Func<object>(() => value)
                             var lambda = SyntaxFactory.ParenthesizedLambdaExpression(value);
                             return SyntaxFactory.ObjectCreationExpression(
-                                SyntaxFactory.GenericName("Func").AddTypeArgumentListArguments(SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.ObjectKeyword))),
+                                FuncOfObjectTypeSyntax,
                                 SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(lambda))),
                                 null);
                         default:
@@ -1676,8 +1797,8 @@
                         case ValueFactoryType.LazyOfT:
                             return value;
                         case ValueFactoryType.FuncOfObject:
-                            // value.ValueFactory;
-                            return SyntaxFactory.MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, value, SyntaxFactory.IdentifierName("ValueFactory"));
+                            // () => value.Value;
+                            return SyntaxFactory.ParenthesizedLambdaExpression(SyntaxFactory.MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, value, SyntaxFactory.IdentifierName("Value")));
                         default:
                             throw new ArgumentOutOfRangeException("target");
                     }
@@ -1699,19 +1820,19 @@
             }
         }
 
-        private ExpressionSyntax GetExportedValueFromPart(ExpressionSyntax lazyPart, ImportDefinitionBinding import, ExportDefinitionBinding export, ValueFactoryType lazyType, ExpressionSyntax thisExportProvider)
+        private ExpressionSyntax GetExportedValueFromPart(ExpressionSyntax partFactory, ImportDefinitionBinding import, ExportDefinitionBinding export, ValueFactoryType lazyType, ExpressionSyntax thisExportProvider)
         {
-            Requires.NotNull(lazyPart, "lazyPart");
+            Requires.NotNull(partFactory, "partFactory");
             Requires.NotNull(import, "import");
             Requires.NotNull(export, "export");
 
             if (export.ExportingMember == null)
             {
-                return this.ConvertValue(lazyPart, this.GetTypeNameSyntax(export.PartDefinition.Type), ValueFactoryType.LazyOfT, lazyType);
+                return this.ConvertValue(partFactory, this.GetTypeNameSyntax(export.PartDefinition.Type), ValueFactoryType.FuncOfObject, lazyType);
             }
 
             // To retrieve a member, we must have the actual instance that hosts it.
-            var partInstance = this.ConvertValue(lazyPart, this.GetTypeNameSyntax(export.PartDefinition.Type), ValueFactoryType.LazyOfT, ValueFactoryType.ActualValue);
+            var partInstance = this.ConvertValue(partFactory, this.GetTypeNameSyntax(export.PartDefinition.Type), ValueFactoryType.FuncOfObject, ValueFactoryType.ActualValue);
 
             var memberValue = CreateMemberRetrieval(export.ExportingMember, partInstance, thisExportProvider);
             switch (export.ExportingMember.MemberType)
@@ -1760,7 +1881,7 @@
             bool isNonSharedInstanceRequired = PartCreationPolicyConstraint.IsNonSharedInstanceRequired(import.ImportDefinition);
             Type[] typeArgs = import.ImportingSiteElementType.GetGenericArguments();
             var exportedValueSyntax = GetExportedValueFromPart(
-                    GetPartInstanceLazy(export.PartDefinition, provisionalSharedObjects, isNonSharedInstanceRequired, typeArgs, scopeExportProvider),
+                    GetPartInstanceFactory(export.PartDefinition, provisionalSharedObjects, isNonSharedInstanceRequired, typeArgs, scopeExportProvider),
                     import,
                     export,
                     import.IsLazy ? ValueFactoryType.FuncOfObject : ValueFactoryType.ActualValue,
@@ -1771,10 +1892,11 @@
                 if (!export.IsStaticExport && !export.PartDefinition.IsInstantiable)
                 {
                     // Don't bother with code for generating a part we can't access. Just emit code to throw.
-                    exportedValueSyntax = SyntaxFactory.MemberAccessExpression(
-                        SyntaxKind.SimpleMemberAccessExpression,
-                        SyntaxFactory.IdentifierName("NotInstantiablePartLazy"),
-                        SyntaxFactory.IdentifierName("ValueFactory"));
+                    exportedValueSyntax = SyntaxFactory.ParenthesizedLambdaExpression(
+                        SyntaxFactory.MemberAccessExpression(
+                            SyntaxKind.SimpleMemberAccessExpression,
+                            SyntaxFactory.IdentifierName("NotInstantiablePartLazy"),
+                            SyntaxFactory.IdentifierName("Value")));
                 }
 
                 var lazyExportedValueSyntax = CreateLazyConstruction(
@@ -1802,7 +1924,7 @@
             var exportExpressions = exports.Select(e => this.ExportCreationSyntax(e, importDefinition, thisExportProvider)).ToArray();
 
             var exportArrayType = SyntaxFactory.ArrayType(
-                    SyntaxFactory.IdentifierName("Export"),
+                    SyntaxFactory.IdentifierName("ExportInfo"),
                     SyntaxFactory.SingletonList<ArrayRankSpecifierSyntax>(
                         SyntaxFactory.ArrayRankSpecifier(
                             SyntaxFactory.SingletonSeparatedList<ExpressionSyntax>(
@@ -1818,7 +1940,7 @@
                     SyntaxFactory.Token(SyntaxKind.InternalKeyword),
                     SyntaxFactory.Token(SyntaxKind.StaticKeyword))
                 .AddParameterListParameters(
-                    SyntaxFactory.Parameter(thisExportProviderIdentifier.Identifier).WithType(this.GetTypeNameSyntax(typeof(ExportProvider))),
+                    SyntaxFactory.Parameter(thisExportProviderIdentifier.Identifier).WithType(ExportProviderIdentifierName),
                     SyntaxFactory.Parameter(importDefinition.Identifier).WithType(SyntaxFactory.IdentifierName("ImportDefinition")))
                 .AddBodyStatements(SyntaxFactory.ReturnStatement(exportArrayExpression));
             return method;
@@ -2051,7 +2173,7 @@
         }
 
         /// <summary>
-        /// Creates an expression that creates a <see cref="LazyPart{T, TMetadata}"/> instance.
+        /// Creates an expression that creates a <see cref="Lazy{T, TMetadata}"/> instance.
         /// </summary>
         /// <param name="valueType">The type for T.</param>
         /// <param name="valueFactory">The value factory, including the lambda when applicable.</param>
@@ -2064,12 +2186,19 @@
             Requires.NotNull(valueType, "valueType");
             Requires.NotNull(valueFactory, "valueFactory");
 
-            Type lazyTypeDefinition = metadataType != null ? typeof(LazyPart<,>) : typeof(LazyPart<>);
+            Type lazyTypeDefinition = metadataType != null ? typeof(Lazy<,>) : typeof(Lazy<>);
             Type[] lazyTypeArgs = metadataType != null ? new[] { valueType, metadataType } : new[] { valueType };
             Type lazyType = lazyTypeDefinition.MakeGenericType(lazyTypeArgs);
-            ExpressionSyntax[] lazyArgs = metadataType == null ? new[] { valueFactory } : new[] { valueFactory, metadata };
 
-            var ctor = lazyType.GetConstructors().First(c => c.GetParameters()[0].ParameterType.Equals(typeof(Func<object>)));
+            Type[] ctorArgTypes = lazyTypeArgs.ToArray();
+            ctorArgTypes[0] = typeof(Func<>).MakeGenericType(ctorArgTypes[0]);
+
+            ExpressionSyntax adaptedValueFactory = valueType != typeof(object)
+                ? CreateFuncOfType(valueFactory, valueType, thisExportProvider)
+                : valueFactory;
+
+            var ctor = lazyType.GetConstructor(ctorArgTypes);
+            ExpressionSyntax[] lazyArgs = metadataType == null ? new[] { adaptedValueFactory } : new[] { adaptedValueFactory, metadata };
             var lazyConstruction = this.ObjectCreationExpression(ctor, lazyArgs, thisExportProvider);
             return lazyConstruction;
         }
@@ -2137,7 +2266,7 @@
             return index;
         }
 
-        private LiteralExpressionSyntax GetTypeIdSyntax(Type type)
+        private ExpressionSyntax GetTypeIdSyntax(Type type)
         {
             int index = GetTypeId(type);
 
@@ -2147,22 +2276,38 @@
             return indexExpression;
         }
 
+        private ExpressionSyntax GetTypeRefSyntax(Type type, ExpressionSyntax thisExportProvider)
+        {
+            Requires.NotNull(type, "type");
+            Requires.NotNull(thisExportProvider, "thisExportProvider");
+
+            var indexExpression = this.GetTypeIdSyntax(type);
+
+            var arrayLookup = SyntaxFactory.ElementAccessExpression(
+                SyntaxFactory.MemberAccessExpression(
+                    SyntaxKind.SimpleMemberAccessExpression,
+                    thisExportProvider,
+                    TypeRefsArrayFieldName),
+                SyntaxFactory.BracketedArgumentList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(
+                    indexExpression))));
+
+            return arrayLookup;
+        }
+
         private ExpressionSyntax GetTypeSyntax(Type type, ExpressionSyntax thisExportProvider)
         {
             Requires.NotNull(type, "type");
             Requires.NotNull(thisExportProvider, "thisExportProvider");
 
-            var index = this.GetTypeIdSyntax(type);
+            var typeRef = this.GetTypeRefSyntax(type, thisExportProvider);
 
-            // this.GetType(index)
+            // typeRef.Resolve()
             var typeExpression = SyntaxFactory.InvocationExpression(
                 SyntaxFactory.MemberAccessExpression(
                     SyntaxKind.SimpleMemberAccessExpression,
-                    thisExportProvider,
-                    SyntaxFactory.IdentifierName("GetType")),
-                SyntaxFactory.ArgumentList(
-                    SyntaxFactory.SingletonSeparatedList<ArgumentSyntax>(
-                        SyntaxFactory.Argument(index))));
+                    typeRef,
+                    SyntaxFactory.IdentifierName("Resolve")),
+                SyntaxFactory.ArgumentList());
 
             return typeExpression;
         }
@@ -2174,8 +2319,9 @@
 
             bool isOpenGenericExport = export.ExportedValueType.ContainsGenericParameters;
             var partDefinition = export.PartDefinition;
-            ExpressionSyntax partTypeExpression = this.GetTypeIdSyntax(
-                isOpenGenericExport ? partDefinition.Type.GetGenericTypeDefinition() : partDefinition.Type);
+            ExpressionSyntax partTypeExpression = this.GetTypeRefSyntax(
+                isOpenGenericExport ? partDefinition.Type.GetGenericTypeDefinition() : partDefinition.Type,
+                thisExportProvider);
 
             ExpressionSyntax partFactoryMethod;
             ExpressionSyntax partFactoryMethodDeclaringType = null;
@@ -2233,9 +2379,9 @@
         }
 
         /// <summary>
-        /// Creates an expression that evaluates to an <see cref="ILazy{Object}"/>.
+        /// Creates an expression that evaluates to a <see cref="Func{Object}"/>.
         /// </summary>
-        private ExpressionSyntax GetPartInstanceLazy(ComposablePartDefinition partDefinition, ExpressionSyntax provisionalSharedObjects, bool nonSharedInstanceRequired, IReadOnlyList<Type> typeArgs, ExpressionSyntax scopeExportProvider)
+        private ExpressionSyntax GetPartInstanceFactory(ComposablePartDefinition partDefinition, ExpressionSyntax provisionalSharedObjects, bool nonSharedInstanceRequired, IReadOnlyList<Type> typeArgs, ExpressionSyntax scopeExportProvider)
         {
             Requires.NotNull(partDefinition, "partDefinition");
             Requires.NotNull(provisionalSharedObjects, "provisionalSharedObjects");
@@ -2253,14 +2399,22 @@
             {
                 // Special case for our synthesized part that acts as a placeholder for *this* export provider.
                 // this.NonDisposableWrapper
-                return SyntaxFactory.MemberAccessExpression(
-                    SyntaxKind.SimpleMemberAccessExpression,
-                    scopeExportProvider,
-                    SyntaxFactory.IdentifierName("NonDisposableWrapper"));
+                return SyntaxFactory.ObjectCreationExpression(
+                    FuncOfObjectTypeSyntax,
+                    SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(
+                        SyntaxFactory.ParenthesizedLambdaExpression(
+                            SyntaxFactory.MemberAccessExpression(
+                                SyntaxKind.SimpleMemberAccessExpression,
+                                SyntaxFactory.MemberAccessExpression(
+                                    SyntaxKind.SimpleMemberAccessExpression,
+                                    scopeExportProvider,
+                                    SyntaxFactory.IdentifierName("NonDisposableWrapper")),
+                                SyntaxFactory.IdentifierName("Value")))))),
+                    null);
             }
 
             Type partType = typeArgs.Count == 0 ? partDefinition.Type : partDefinition.Type.MakeGenericType(typeArgs.ToArray());
-            ExpressionSyntax partTypeExpression = this.GetTypeIdSyntax(partType);
+            ExpressionSyntax partTypeExpression = this.GetTypeRefSyntax(partType, scopeExportProvider);
             SimpleNameSyntax partFactoryMethodName = SyntaxFactory.IdentifierName(GetPartFactoryMethodNameNoTypeArgs(partDefinition));
             ExpressionSyntax partFactoryMethod;
             bool publicInvocation = typeArgs.All(t => IsPublic(t, true));
@@ -2303,8 +2457,8 @@
                     SyntaxFactory.ArgumentList(CodeGen.JoinSyntaxNodes(SyntaxKind.CommaToken, typeArgsExpressionSyntax.Select(SyntaxFactory.Argument).ToArray())));
                 var funcOfProviderDictionaryObject = SyntaxFactory.GenericName("Func")
                     .AddTypeArgumentListArguments(
-                        SyntaxFactory.IdentifierName("ExportProvider"),
-                        dictionaryOfIntObject,
+                        ExportProviderIdentifierName,
+                        dictionaryOfTypeRefObject,
                         SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.ObjectKeyword)));
                 var createDelegate = SyntaxFactory.InvocationExpression(
                     SyntaxFactory.MemberAccessExpression(
@@ -2339,107 +2493,6 @@
             return invocation;
         }
 
-        private MemberDeclarationSyntax CreateGetTypeIdCoreMethod()
-        {
-            var typeRefParameter = SyntaxFactory.IdentifierName("typeRef");
-            var method = SyntaxFactory.MethodDeclaration(
-                SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.IntKeyword)),
-                "GetTypeIdCore")
-                .AddModifiers(
-                    SyntaxFactory.Token(SyntaxKind.ProtectedKeyword),
-                    SyntaxFactory.Token(SyntaxKind.OverrideKeyword))
-                .WithParameterList(SyntaxFactory.ParameterList(SyntaxFactory.SingletonSeparatedList<ParameterSyntax>(
-                    SyntaxFactory.Parameter(
-                        SyntaxFactory.List<AttributeListSyntax>(),
-                        SyntaxFactory.TokenList(),
-                        this.GetTypeNameSyntax(typeof(Reflection.TypeRef)),
-                        typeRefParameter.Identifier,
-                        null))));
-
-            var statements = new List<StatementSyntax>();
-            var typeLocal = SyntaxFactory.IdentifierName("type");
-            statements.Add(SyntaxFactory.LocalDeclarationStatement(SyntaxFactory.VariableDeclaration(
-                SyntaxFactory.IdentifierName("Type"),
-                SyntaxFactory.SingletonSeparatedList(SyntaxFactory.VariableDeclarator(
-                    typeLocal.Identifier,
-                    null,
-                    SyntaxFactory.EqualsValueClause(
-                        SyntaxFactory.InvocationExpression(
-                            SyntaxFactory.MemberAccessExpression(
-                                SyntaxKind.SimpleMemberAccessExpression,
-                                SyntaxFactory.ParseName("Microsoft.VisualStudio.Composition.Reflection.Resolver"),
-                                SyntaxFactory.IdentifierName("Resolve")),
-                            SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(
-                                typeRefParameter))))))))));
-
-            var fullTypeName = SyntaxFactory.IdentifierName("fullTypeName");
-            statements.Add(SyntaxFactory.LocalDeclarationStatement(SyntaxFactory.VariableDeclaration(
-                SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.StringKeyword)),
-                SyntaxFactory.SingletonSeparatedList(SyntaxFactory.VariableDeclarator(
-                    fullTypeName.Identifier,
-                    null,
-                    SyntaxFactory.EqualsValueClause(
-                        SyntaxFactory.MemberAccessExpression(
-                            SyntaxKind.SimpleMemberAccessExpression,
-                            typeLocal,
-                            SyntaxFactory.IdentifierName("FullName"))))))));
-            var assemblyFullName = SyntaxFactory.IdentifierName("assemblyFullName");
-            statements.Add(SyntaxFactory.LocalDeclarationStatement(SyntaxFactory.VariableDeclaration(
-                SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.StringKeyword)),
-                SyntaxFactory.SingletonSeparatedList(SyntaxFactory.VariableDeclarator(
-                    assemblyFullName.Identifier,
-                    null,
-                    SyntaxFactory.EqualsValueClause(
-                        SyntaxFactory.MemberAccessExpression(
-                            SyntaxKind.SimpleMemberAccessExpression,
-                            SyntaxFactory.MemberAccessExpression(
-                                SyntaxKind.SimpleMemberAccessExpression,
-                                SyntaxFactory.InvocationExpression(
-                                    SyntaxFactory.MemberAccessExpression(
-                                        SyntaxKind.SimpleMemberAccessExpression,
-                                        typeLocal,
-                                        SyntaxFactory.IdentifierName("GetTypeInfo")),
-                                    SyntaxFactory.ArgumentList()),
-                                SyntaxFactory.IdentifierName("Assembly")),
-                            SyntaxFactory.IdentifierName("FullName"))))))));
-
-            var returnMinusOneSection = SyntaxFactory.SwitchSection(
-                SyntaxFactory.SingletonList<SwitchLabelSyntax>(
-                    SyntaxFactory.SwitchLabel(SyntaxKind.DefaultSwitchLabel)),
-                SyntaxFactory.SingletonList<StatementSyntax>(
-                    SyntaxFactory.ReturnStatement(
-                        SyntaxFactory.LiteralExpression(SyntaxKind.NumericLiteralExpression, SyntaxFactory.Literal(-1)))));
-
-            Func<string, StatementSyntax, SwitchSectionSyntax> createSection = (label, statement) => SyntaxFactory.SwitchSection(
-                SyntaxFactory.SingletonList(SyntaxFactory.SwitchLabel(SyntaxKind.CaseSwitchLabel, SyntaxFactory.LiteralExpression(SyntaxKind.StringLiteralExpression, SyntaxFactory.Literal(label)))),
-                SyntaxFactory.SingletonList(statement));
-
-            var assemblySwitchStatement = SyntaxFactory.SwitchStatement(assemblyFullName);
-            foreach (var assembly in this.reflectionLoadedTypes.Select(t => t.Assembly).Distinct())
-            {
-                var typeSwitchStatement = SyntaxFactory.SwitchStatement(fullTypeName);
-                for (int i = 0; i < this.reflectionLoadedTypes.Count; i++)
-                {
-                    Type type = this.reflectionLoadedTypes[i];
-                    if (type.Assembly == assembly)
-                    {
-                        typeSwitchStatement = typeSwitchStatement.AddSections(createSection(
-                            type.FullName,
-                            SyntaxFactory.ReturnStatement(SyntaxFactory.LiteralExpression(SyntaxKind.NumericLiteralExpression, SyntaxFactory.Literal(i)))));
-                    }
-                }
-
-                typeSwitchStatement = typeSwitchStatement.AddSections(returnMinusOneSection);
-                assemblySwitchStatement = assemblySwitchStatement.AddSections(createSection(assembly.FullName, typeSwitchStatement));
-            }
-
-            assemblySwitchStatement = assemblySwitchStatement.AddSections(returnMinusOneSection);
-
-            statements.Add(assemblySwitchStatement);
-            method = method.WithBody(SyntaxFactory.Block(statements));
-            return method;
-        }
-
         private MemberDeclarationSyntax CreateField(SyntaxToken fieldName, TypeSyntax fieldType, object value, ExpressionSyntax thisExportProvider)
         {
             Requires.NotNull(fieldType, "fieldType");
@@ -2456,97 +2509,6 @@
                     SyntaxFactory.Token(SyntaxKind.PrivateKeyword),
                     SyntaxFactory.Token(SyntaxKind.StaticKeyword),
                     SyntaxFactory.Token(SyntaxKind.ReadOnlyKeyword));
-        }
-
-        private MemberDeclarationSyntax CreateGetTypeCoreMethod()
-        {
-            this.EnsureTypeArgumentsAreDescribed();
-
-            var intArrayType = SyntaxFactory.ArrayType(
-                SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.IntKeyword)),
-                SyntaxFactory.SingletonList(SyntaxFactory.ArrayRankSpecifier(SyntaxFactory.SingletonSeparatedList<ExpressionSyntax>(SyntaxFactory.OmittedArraySizeExpression()))));
-            var assemblyArray = SyntaxFactory.IdentifierName("typeAssemblyId");
-            this.extraMembers.Add(this.CreateField(
-                assemblyArray.Identifier,
-                intArrayType,
-                this.reflectionLoadedTypes.Select(t => GetManifestModuleId(t.Assembly)).ToArray(),
-                SyntaxFactory.ThisExpression()));
-            var typeArray = SyntaxFactory.IdentifierName("typeTypeId");
-            this.extraMembers.Add(this.CreateField(
-                typeArray.Identifier,
-                intArrayType,
-                this.reflectionLoadedTypes.Select(t => t.MetadataToken).ToArray(),
-                SyntaxFactory.ThisExpression()));
-            var typeGenericArgArray = SyntaxFactory.IdentifierName("typeGenericArgumentId");
-            this.extraMembers.Add(this.CreateField(
-                typeGenericArgArray.Identifier,
-                SyntaxFactory.ArrayType(intArrayType, SyntaxFactory.SingletonList(SyntaxFactory.ArrayRankSpecifier(SyntaxFactory.SingletonSeparatedList<ExpressionSyntax>(SyntaxFactory.OmittedArraySizeExpression())))),
-                this.reflectionLoadedTypes.Select(t => (t.IsGenericType && !t.IsGenericTypeDefinition) ? t.GenericTypeArguments.Select(GetTypeId).ToArray() : null).ToArray(),
-                SyntaxFactory.ThisExpression()));
-
-            var typeLocalVar = SyntaxFactory.IdentifierName("type");
-            var typeIdParameter = SyntaxFactory.IdentifierName("typeId");
-            var bracketTypeId = SyntaxFactory.BracketedArgumentList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(typeIdParameter)));
-            var method = SyntaxFactory.MethodDeclaration(SyntaxFactory.IdentifierName("Type"), "GetTypeCore")
-                .AddModifiers(
-                    SyntaxFactory.Token(SyntaxKind.ProtectedKeyword),
-                    SyntaxFactory.Token(SyntaxKind.OverrideKeyword))
-                .WithParameterList(SyntaxFactory.ParameterList(SyntaxFactory.SingletonSeparatedList<ParameterSyntax>(
-                    SyntaxFactory.Parameter(
-                        SyntaxFactory.List<AttributeListSyntax>(),
-                        SyntaxFactory.TokenList(),
-                        SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.IntKeyword)),
-                        typeIdParameter.Identifier,
-                        null))))
-                .AddBodyStatements(
-                    SyntaxFactory.LocalDeclarationStatement(SyntaxFactory.VariableDeclaration(
-                        SyntaxFactory.IdentifierName("Type"),
-                        SyntaxFactory.SingletonSeparatedList(SyntaxFactory.VariableDeclarator(
-                            typeLocalVar.Identifier,
-                            null,
-                            SyntaxFactory.EqualsValueClause(
-                                SyntaxFactory.InvocationExpression(
-                                    SyntaxFactory.MemberAccessExpression(
-                                        SyntaxKind.SimpleMemberAccessExpression,
-                                        SyntaxFactory.InvocationExpression(
-                                            SyntaxFactory.MemberAccessExpression(
-                                                SyntaxKind.SimpleMemberAccessExpression,
-                                                SyntaxFactory.ThisExpression(),
-                                                SyntaxFactory.IdentifierName("GetAssemblyManifest")),
-                                            SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(
-                                                SyntaxFactory.Argument(SyntaxFactory.ElementAccessExpression(assemblyArray, bracketTypeId))))),
-                                        SyntaxFactory.IdentifierName("ResolveType")),
-                                    SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(
-                                        SyntaxFactory.ElementAccessExpression(typeArray, bracketTypeId)))))))))),
-                SyntaxFactory.IfStatement(
-                    SyntaxFactory.BinaryExpression(
-                        SyntaxKind.NotEqualsExpression,
-                        SyntaxFactory.ElementAccessExpression(typeGenericArgArray, bracketTypeId),
-                        NullSyntax),
-                // type = type.MakeGenericType(typeGenericArgumentId[typeId].Select(GetTypeCore).ToArray())
-                    SyntaxFactory.ExpressionStatement(SyntaxFactory.BinaryExpression(
-                        SyntaxKind.SimpleAssignmentExpression,
-                        typeLocalVar,
-                        SyntaxFactory.InvocationExpression(
-                            SyntaxFactory.MemberAccessExpression(
-                                SyntaxKind.SimpleMemberAccessExpression,
-                                typeLocalVar,
-                                SyntaxFactory.IdentifierName("MakeGenericType")),
-                            SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(
-                                SyntaxFactory.InvocationExpression(
-                                    SyntaxFactory.MemberAccessExpression(
-                                        SyntaxKind.SimpleMemberAccessExpression,
-                                        SyntaxFactory.InvocationExpression(
-                                            SyntaxFactory.MemberAccessExpression(
-                                                SyntaxKind.SimpleMemberAccessExpression,
-                                                SyntaxFactory.ElementAccessExpression(typeGenericArgArray, bracketTypeId),
-                                                SyntaxFactory.IdentifierName("Select")),
-                                            SyntaxFactory.ArgumentList(SyntaxFactory.SingletonSeparatedList(
-                                                SyntaxFactory.Argument(SyntaxFactory.IdentifierName("GetTypeCore"))))),
-                                        SyntaxFactory.IdentifierName("ToArray")),
-                                    SyntaxFactory.ArgumentList())))))))),
-                SyntaxFactory.ReturnStatement(typeLocalVar));
-            return method;
         }
 
         private void EnsureTypeArgumentsAreDescribed()

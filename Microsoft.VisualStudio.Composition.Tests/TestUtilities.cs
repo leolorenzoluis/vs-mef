@@ -17,17 +17,6 @@
 
     internal static class TestUtilities
     {
-        internal static async Task<IExportProviderFactory> CacheAndReloadConfiguration(CompositionConfiguration configuration, ICompositionCacheManager cacheManager)
-        {
-            Requires.NotNull(configuration, "configuration");
-            Requires.NotNull(cacheManager, "cacheManager");
-
-            var ms = new MemoryStream();
-            await cacheManager.SaveAsync(configuration, ms);
-            ms.Position = 0;
-            return await cacheManager.LoadExportProviderFactoryAsync(ms);
-        }
-
         internal static ExportProvider CreateContainer(this CompositionConfiguration configuration, bool runtime)
         {
             Requires.NotNull(configuration, "configuration");
@@ -40,6 +29,7 @@
                 var cacheManager = new CachedComposition();
                 var ms = new MemoryStream();
                 cacheManager.SaveAsync(runtimeComposition, ms).GetAwaiter().GetResult();
+                Console.WriteLine("Cache file size: {0}", ms.Length);
                 ms.Position = 0;
                 var deserializedRuntimeComposition = cacheManager.LoadRuntimeCompositionAsync(ms).GetAwaiter().GetResult();
                 Assert.Equal(runtimeComposition, deserializedRuntimeComposition);
@@ -313,6 +303,7 @@
                 {
                     // Set breakpoint here
                 }
+
                 return result;
             }
 
@@ -500,7 +491,7 @@
             public Lazy<T> GetExport<T>()
             {
                 // MEF v2 doesn't support this, so emulate it.
-                return new LazyPart<T>(() =>
+                return new Lazy<T>(() =>
                 {
                     try
                     {
@@ -516,7 +507,7 @@
             public Lazy<T> GetExport<T>(string contractName)
             {
                 // MEF v2 doesn't support this, so emulate it.
-                return new LazyPart<T>(() =>
+                return new Lazy<T>(() =>
                 {
                     try
                     {
