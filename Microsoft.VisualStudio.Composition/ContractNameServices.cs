@@ -49,17 +49,21 @@
 
         internal static string GetTypeIdentity(TypeDefinition typeDef, MetadataReader reader, bool formatGenericName)
         {
-            return "Microsoft.VisualStudio.Composition.Tests.SimpleImportExportTests+" + reader.GetString(typeDef.Name);
-            /* TODO: Fix this to not be one contract only.
-            var nSpace = reader.GetString(typeDef.Namespace);
-            var name = reader.GetString(typeDef.Name);
-
-            if (string.IsNullOrEmpty(nSpace))
+            string toReturn = string.Empty;
+            var declaringType = typeDef.GetDeclaringType();
+            if (!declaringType.IsNil)
             {
-                return name;
+                toReturn = GetTypeIdentity(reader.GetTypeDefinition(declaringType), reader, formatGenericName) + "+";
             }
 
-            return nSpace + "." + name;*/
+            var ns = reader.GetString(typeDef.Namespace);
+            if (!string.IsNullOrEmpty(ns))
+            {
+                toReturn = toReturn + ns + ".";
+            }
+
+            toReturn = toReturn + reader.GetString(typeDef.Name);
+            return toReturn;
         }
 
         internal static string GetTypeIdentity(Type type, bool formatGenericName)

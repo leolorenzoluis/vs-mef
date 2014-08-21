@@ -138,10 +138,11 @@
             }
         }
 
-        private class PartDiscoveryWrapper : IPartDiscovery
+        private class PartDiscoveryWrapper<T> : IPartDiscovery
+            where T : PartDiscovery
         {
-            private PartDiscovery _pd;
-            public PartDiscoveryWrapper(PartDiscovery pd)
+            private T _pd;
+            public PartDiscoveryWrapper(T pd)
             {
                 if (pd == null)
                 {
@@ -168,14 +169,14 @@
             var discovery = new List<IPartDiscovery>();
             if (this.compositionVersions.HasFlag(CompositionEngines.V3EmulatingV1))
             {
-                discovery.Add(new PartDiscoveryWrapper(new AttributedPartDiscoveryV1()));
+                discovery.Add(new PartDiscoveryWrapper<AttributedPartDiscoveryV1>(new AttributedPartDiscoveryV1()));
                 discovery.Add(new LightweightPartDiscoveryV1());
                 titleAppends.Add("V1");
             }
 
             if (this.compositionVersions.HasFlag(CompositionEngines.V3EmulatingV2))
             {
-                discovery.Add(new PartDiscoveryWrapper(
+                discovery.Add(new PartDiscoveryWrapper<AttributedPartDiscovery>(
                     new AttributedPartDiscovery { IsNonPublicSupported = compositionVersions.HasFlag(CompositionEngines.V3EmulatingV2WithNonPublic) }));
                 discovery.Add(new LightweightPartDiscoveryV2());
                 titleAppends.Add("V2");
@@ -183,7 +184,7 @@
 
             if (this.compositionVersions.HasFlag(CompositionEngines.V3EmulatingV1AndV2AtOnce))
             {
-                discovery.Add(new PartDiscoveryWrapper(
+                discovery.Add(new PartDiscoveryWrapper<PartDiscovery>(
                     PartDiscovery.Combine(
                     new AttributedPartDiscoveryV1(),
                     new AttributedPartDiscovery { IsNonPublicSupported = compositionVersions.HasFlag(CompositionEngines.V3EmulatingV2WithNonPublic) })));
