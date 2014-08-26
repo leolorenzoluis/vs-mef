@@ -247,7 +247,7 @@
         [Fact]
         public async Task ValidMultiplePaths()
         {
-            CompositionConfiguration.Create(await new AttributedPartDiscovery().CreatePartsAsync( 
+            CompositionConfiguration.Create(await new AttributedPartDiscovery().CreatePartsAsync(
                 typeof(ValidMultiplePathRoot),
                 typeof(ValidMultiplePathTrail1),
                 typeof(ValidMultiplePathTrail2),
@@ -280,6 +280,44 @@
 
         [Export]
         public class ValidMultiplePathCommonImport { }
+
+        #endregion
+
+        #region Non-lazy import of part with ImportingConstructor that imports original part
+
+        /// <summary>
+        /// Exercises code that relies on provisionalSharedObjects
+        /// to break circular dependencies in a way that tries to force
+        /// thread safety issues to show themselves.
+        /// </summary>
+        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat, typeof(RootPartWithNonLazyImport), typeof(SomeOtherPart))]
+        public void NonLazyPartRequestedAcrossMultipleThreads(IContainer container)
+        {
+            var part = container.GetExportedValue<RootPartWithNonLazyImport>();
+            var extension = part.ImportingProperty;
+            Assert.Same(part, extension.RootPart);
+        }
+
+        [Export]
+        [MefV1.Export, MefV1.PartCreationPolicy(MefV1.CreationPolicy.NonShared)]
+        public class RootPartWithNonLazyImport
+        {
+            [Import, MefV1.Import]
+            public SomeOtherPart ImportingProperty { get; set; }
+        }
+
+        [Export, Shared]
+        [MefV1.Export]
+        public class SomeOtherPart
+        {
+            [ImportingConstructor, MefV1.ImportingConstructor]
+            public SomeOtherPart(RootPartWithNonLazyImport rootPart)
+            {
+                this.RootPart = rootPart;
+            }
+
+            public RootPartWithNonLazyImport RootPart { get; private set; }
+        }
 
         #endregion
     }
