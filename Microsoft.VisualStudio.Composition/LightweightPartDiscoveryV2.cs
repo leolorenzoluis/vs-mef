@@ -15,7 +15,7 @@
         private static LightweightPartDiscoveryV1 _v1 = new LightweightPartDiscoveryV1();
 
         public override ComposablePartDefinition CreatePart(MetadataReader metadataReader, TypeDefinition typeDefinition,
-            HashSet<string> knownExportTypes, string assemblyName, int metadataToken)
+            HashSet<string> knownExportTypes, string assemblyName, int metadataToken, bool partExplicitlyRequested)
         {
             //foreach (CustomAttributeHandle typeAttributeHandle in typeDefinition.GetCustomAttributes())
             //{
@@ -28,7 +28,7 @@
             //    this.TryHandleExportAttribute(metadataReader, attribute, attributeTypeHandle, out exportDefinitionBinding);
             //}
 
-            return _v1.CreatePart(metadataReader, typeDefinition, knownExportTypes, assemblyName, metadataToken);
+            return _v1.CreatePart(metadataReader, typeDefinition, knownExportTypes, assemblyName, metadataToken, partExplicitlyRequested);
         }
 
         private bool TryHandleExportAttribute(MetadataReader metadataReader, CustomAttribute customAttribute, Handle attributeTypeHandle, out ExportDefinitionBinding exportDefinitionBinding)

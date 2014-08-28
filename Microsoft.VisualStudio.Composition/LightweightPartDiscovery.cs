@@ -16,7 +16,7 @@
     public abstract class LightweightPartDiscovery : IPartDiscovery
     {
         public abstract ComposablePartDefinition CreatePart(MetadataReader metadataReader, TypeDefinition typeDefinition, 
-            HashSet<string> knownExportTypes, string assemblyName, int metadataToken);
+            HashSet<string> knownExportTypes, string assemblyName, int metadataToken, bool typeExplicitlyRequested);
 
         /// <summary>
         /// Creates MEF parts from an assembly.
@@ -42,7 +42,7 @@
                     {
                         try
                         {
-                            var part = this.CreatePart(metadataReader, td, null, string.Empty, 0);
+                            var part = this.CreatePart(metadataReader, td, null, string.Empty, 0, false);
                             if (part != null)
                                 parts.Add(part);
                         }
@@ -109,7 +109,7 @@
                                 {
                                     var definition = metadataReader.TypeDefinitions.First(td => type.MetadataToken == metadataReader.GetToken(td));
                                     var typeDefinition = metadataReader.GetTypeDefinition(definition);
-                                    var part = this.CreatePart(metadataReader, typeDefinition, knownExportTypes, assembly.Key.FullName, type.MetadataToken);
+                                    var part = this.CreatePart(metadataReader, typeDefinition, knownExportTypes, assembly.Key.FullName, type.MetadataToken, true);
                                     if (part != null)
                                         parts.Add(part);
                                 }
@@ -174,13 +174,19 @@
             }
 
             public override ComposablePartDefinition CreatePart(MetadataReader metadataReader, TypeDefinition typeDefinition,
-                HashSet<string> knownExportTypes, string assemblyName, int metadataToken)
+                HashSet<string> knownExportTypes, string assemblyName, int metadataToken, bool typeExplicitlyRequested)
             {
                 Requires.NotNull(metadataReader, "metadataReader");
             
                 foreach (var discovery in this.discoveryMechanisms)
                 {
-                    var result = discovery.CreatePart(metadataReader, typeDefinition, knownExportTypes, assemblyName, metadataToken);
+                    var result = discovery.CreatePart(
+                        metadataReader, 
+                        typeDefinition,
+                        knownExportTypes,
+                        assemblyName,
+                        metadataToken,
+                        typeExplicitlyRequested);
                     if (result != null)
                     {
                         return result;
