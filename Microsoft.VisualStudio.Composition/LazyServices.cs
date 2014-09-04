@@ -71,16 +71,31 @@
         {
             Requires.NotNull(lazy, "lazy");
 
-            // Theoretically, this is the most efficient approach. It only allocates a delegate (no closure).
-            // But it unfortunately results in a slow path within the CLR (clr!COMDelegate::DelegateConstruct)
-            // That ends up taking 52ms in Auto7 solution open.
-            ////return new Func<T>(lazy.GetLazyValue);
-
-            // So instead, we allocate the closure and qualify for the CLR's fast path.
-            return () => lazy.Value;
+            if (typeof(T) == typeof(object))
+            {
+                // This is a very specific syntax that leverages the C# compiler
+                // to emit very efficient code for constructing a delegate that
+                // uses the "Target" property to store the first parameter to
+                // the method.
+                // We have to avoid all generic type arguments in order to qualify for the fast path.
+                var lazyOfObject = (Lazy<object>)(object)lazy;
+                return (Func<T>)(object)new Func<object>(lazyOfObject.GetLazyValue);
+            }
+            else
+            {
+                // Just create a lambda, and the closure it requires.
+                // Don't use the fancy extension method syntax to avoid the closure
+                // Because our generic type argument T will cause the JIT to 
+                // take a very slow path for delegate creation so although we'll avoid the closure,
+                // we'll pay for it dearly in performance in other ways.
+                // The slow path involves COMDelegate::DelegateConstruct, and is used
+                // because the CLR has to make sure T isn't collected while the delegate lives
+                // if T is defined in a collectible assembly.
+                return () => lazy.Value;
+            }
         }
 
-        private static T GetLazyValue<T>(this Lazy<T> lazy)
+        private static object GetLazyValue(this Lazy<object> lazy)
         {
             return lazy.Value;
         }

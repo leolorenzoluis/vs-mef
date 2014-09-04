@@ -34,7 +34,6 @@
         /// <param name="value">The value to return from the lazy.</param>
         /// <returns>The lazy instance.</returns>
         internal static Func<T> FromValue<T>(T value)
-            where T : class
         {
             return value.AsFunc();
         }
@@ -47,19 +46,23 @@
         /// <returns>A delegate which, when invoked, will invoke <paramref name="valueFactory"/>.</returns>
         internal static Func<T> As<T>(this Func<object> valueFactory)
         {
-            // Theoretically, this is the most efficient approach. It only allocates a delegate (no closure).
-            // But it unfortunately results in a slow path within the CLR (clr!COMDelegate::DelegateConstruct)
-            // That ends up taking 19ms in Auto7 solution open.
-            ////// This is a very specific syntax that leverages the C# compiler
-            ////// to emit very efficient code for constructing a delegate that
-            ////// uses the "Target" property to store the first parameter to
-            ////// the method.
-            ////// It allows us to construct a Func<T> that returns a T
-            ////// without actually allocating a closure -- we only allocate the delegate.
-            ////return new Func<T>(valueFactory.AsHelper<T>);
-
-            // So instead, we allocate the closure and qualify for the CLR's fast path.
-            return () => (T)valueFactory();
+            if (typeof(T) == typeof(object))
+            {
+                // No change to make at all.
+                return (Func<T>)(object)valueFactory;
+            }
+            else
+            {
+                // Just create a lambda, and the closure it requires.
+                // Don't use the fancy extension method syntax to avoid the closure
+                // Because our generic type argument T will cause the JIT to 
+                // take a very slow path for delegate creation so although we'll avoid the closure,
+                // we'll pay for it dearly in performance in other ways.
+                // The slow path involves COMDelegate::DelegateConstruct, and is used
+                // because the CLR has to make sure T isn't collected while the delegate lives
+                // if T is defined in a collectible assembly.
+                return () => (T)valueFactory();
+            }
         }
 
         /// <summary>
@@ -70,39 +73,50 @@
         /// <returns>An instance of <see cref="Func{T}"/>, typed as <see cref="Func{Object}"/>.</returns>
         internal static Func<object> As(this Func<object> func, Type typeArg)
         {
-            using (var args = ArrayRental<object>.Get(1))
+            if (typeArg == typeof(object))
             {
-                args.Value[0] = func;
-                return (Func<object>)CastAsFuncMethodInfo.MakeGenericMethod(typeArg).Invoke(null, args.Value);
+                return func;
+            }
+            else
+            {
+                using (var args = ArrayRental<object>.Get(1))
+                {
+                    args.Value[0] = func;
+                    return (Func<object>)CastAsFuncMethodInfo.MakeGenericMethod(typeArg).Invoke(null, args.Value);
+                }
             }
         }
 
         private static Func<T> AsFunc<T>(this T value)
-            where T : class
         {
-            // Theoretically, this is the most efficient approach. It only allocates a delegate (no closure).
-            // But it unfortunately results in a slow path within the CLR (clr!COMDelegate::DelegateConstruct)
-            // That ends up taking 9ms in Auto7 solution open.
-            ////// This is a very specific syntax that leverages the C# compiler
-            ////// to emit very efficient code for constructing a delegate that
-            ////// uses the "Target" property to store the first parameter to
-            ////// the method.
-            ////// It allows us to construct a Func<T> that returns a T
-            ////// without actually allocating a closure -- we only allocate the delegate.
-            ////return new Func<T>(value.Return);
-
-            // So instead, we allocate the closure and qualify for the CLR's fast path.
-            return () => value;
+            if (typeof(T) == typeof(object))
+            {
+                // This is a very specific syntax that leverages the C# compiler
+                // to emit very efficient code for constructing a delegate that
+                // uses the "Target" property to store the first parameter to
+                // the method.
+                // It allows us to construct a Func<object> that returns a value
+                // without actually allocating a closure -- we only allocate the delegate.
+                // We have to avoid all generic type arguments in order to qualify for the fast path.
+                return (Func<T>)(object)new Func<object>(value.Return);
+            }
+            else
+            {
+                // Just create a lambda, and the closure it requires.
+                // Don't use the fancy extension method syntax to avoid the closure
+                // Because our generic type argument T will cause the JIT to 
+                // take a very slow path for delegate creation so although we'll avoid the closure,
+                // we'll pay for it dearly in performance in other ways.
+                // The slow path involves COMDelegate::DelegateConstruct, and is used
+                // because the CLR has to make sure T isn't collected while the delegate lives
+                // if T is defined in a collectible assembly.
+                return () => value;
+            }
         }
 
-        private static T Return<T>(this T value)
+        private static object Return(this object value)
         {
             return value;
-        }
-
-        private static T AsHelper<T>(this Func<object> value)
-        {
-            return (T)value();
         }
     }
 }
