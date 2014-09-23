@@ -169,7 +169,7 @@
 
         public override int GetHashCode()
         {
-            return this.Type.GetHashCode();
+            return this.TypeRef.GetHashCode();
         }
 
         public override bool Equals(object obj)
@@ -184,7 +184,7 @@
                 return false;
             }
 
-            bool result = this.Type == other.Type
+            bool result = this.TypeRef.Equals(other.TypeRef)
                 && ByValueEquality.Metadata.Equals(this.Metadata, other.Metadata)
                 && this.SharingBoundary == other.SharingBoundary
                 && this.IsSharingBoundaryInferred == other.IsSharingBoundaryInferred
@@ -271,6 +271,35 @@
                     }
                 }
             }
+        }
+
+        internal void GetInputAssemblies(ISet<AssemblyName> assemblies)
+        {
+            Requires.NotNull(assemblies, "assemblies");
+
+            this.TypeRef.GetInputAssemblies(assemblies);
+            ReflectionHelpers.GetInputAssembliesFromMetadata(assemblies, this.Metadata);
+            foreach (var export in this.ExportedTypes)
+            {
+                export.GetInputAssemblies(assemblies);
+            }
+
+            foreach (var exportingMember in this.ExportingMembers)
+            {
+                exportingMember.Key.GetInputAssemblies(assemblies);
+                foreach (var export in exportingMember.Value)
+                {
+                    export.GetInputAssemblies(assemblies);
+                }
+            }
+
+            foreach (var import in this.Imports)
+            {
+                import.GetInputAssemblies(assemblies);
+            }
+
+            this.OnImportsSatisfiedRef.GetInputAssemblies(assemblies);
+            this.ImportingConstructorRef.GetInputAssemblies(assemblies);
         }
     }
 }

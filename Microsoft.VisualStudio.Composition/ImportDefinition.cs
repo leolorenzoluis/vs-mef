@@ -14,7 +14,7 @@
     [DebuggerDisplay("{ContractName,nq} ({Cardinality})")]
     public class ImportDefinition : IEquatable<ImportDefinition>
     {
-        private readonly ImmutableHashSet<IImportSatisfiabilityConstraint> exportConstraints;
+        private readonly ImmutableList<IImportSatisfiabilityConstraint> exportConstraints;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ImportDefinition"/> class
@@ -29,8 +29,8 @@
 
             this.ContractName = contractName;
             this.Cardinality = cardinality;
-            this.Metadata = metadata.ToImmutableDictionary();
-            this.exportConstraints = additionalConstraints.ToImmutableHashSet();
+            this.Metadata = metadata; // don't clone metadata as that will defeat lazy assembly loads when metadata values would require it.
+            this.exportConstraints = additionalConstraints.ToImmutableList();
             this.ExportFactorySharingBoundaries = exportFactorySharingBoundaries.ToImmutableHashSet();
         }
 
@@ -126,6 +126,14 @@
                     }
                 }
             }
+        }
+
+        internal void GetInputAssemblies(ISet<AssemblyName> assemblies)
+        {
+            Requires.NotNull(assemblies, "assemblies");
+
+            // TODO: consider the assembly dependencies brought in by constraints.
+            ReflectionHelpers.GetInputAssembliesFromMetadata(assemblies, this.Metadata);
         }
     }
 }

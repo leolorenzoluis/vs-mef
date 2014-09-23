@@ -24,7 +24,7 @@
 
             var partDefinition = new ComposablePartDefinition(
                 TypeRef.Get(providerType),
-                ImmutableDictionary<string, object>.Empty,
+                ImmutableDictionary<string, object>.Empty.Add(CompositionConstants.DgmlCategoryPartMetadataName, new[] { "VsMEFBuiltIn" }),
                 new[] { exportDefinition },
                 ImmutableDictionary<MemberRef, IReadOnlyCollection<ExportDefinition>>.Empty,
                 ImmutableList<ImportDefinitionBinding>.Empty,
@@ -179,6 +179,17 @@
             {
                 progress.Report(value);
             }
+        }
+
+        internal static Dictionary<TKey, TValue> ToDictionary<TKey, TValue>(this IEnumerable<TValue> source, Func<TValue, TKey> keySelector, int capacity)
+        {
+            var dictionary = new Dictionary<TKey, TValue>(capacity);
+            foreach (var item in source)
+            {
+                dictionary.Add(keySelector(item), item);
+            }
+
+            return dictionary;
         }
     }
 }

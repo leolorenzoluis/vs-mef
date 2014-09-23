@@ -24,7 +24,7 @@
 
         internal static readonly ComposablePartDefinition ExportProviderPartDefinition = new ComposablePartDefinition(
             TypeRef.Get(typeof(ExportProviderAsExport)),
-            ImmutableDictionary<string, object>.Empty,
+            ImmutableDictionary<string, object>.Empty.Add(CompositionConstants.DgmlCategoryPartMetadataName, new [] { "VsMEFBuiltIn" }),
             new[] { ExportProviderExportDefinition },
             ImmutableDictionary<MemberRef, IReadOnlyCollection<ExportDefinition>>.Empty,
             ImmutableList<ImportDefinitionBinding>.Empty,
@@ -312,7 +312,6 @@
             Requires.NotNull(importDefinition, "importDefinition");
             Requires.NotNull(metadata, "metadata");
             Requires.NotNull(partTypeRef, "partTypeRef");
-            Requires.NotNull(valueFactory, "valueFactory");
 
             var provisionalSharedObjects = new Dictionary<TypeRef, object>();
             Func<object> maybeSharedValueFactory = this.GetOrCreateShareableValue(partTypeRef, valueFactory, provisionalSharedObjects, partSharingBoundary, nonSharedInstanceRequired);
@@ -451,10 +450,18 @@
                     return method.Invoke(exportingPart, EmptyObjectArray);
                 }
 
-                Type delegateType = importingSiteElementType != null && typeof(Delegate).GetTypeInfo().IsAssignableFrom(importingSiteElementType.GetTypeInfo())
-                    ? importingSiteElementType
-                    : (exportedValueType ?? ReflectionHelpers.GetContractTypeForDelegate(method));
-                return method.CreateDelegate(delegateType, method.IsStatic ? null : exportingPart);
+                object target = method.IsStatic ? null : exportingPart;
+                if (importingSiteElementType != null)
+                {
+                    Type delegateType = typeof(Delegate).GetTypeInfo().IsAssignableFrom(importingSiteElementType.GetTypeInfo())
+                        ? importingSiteElementType
+                        : (exportedValueType ?? ReflectionHelpers.GetContractTypeForDelegate(method));
+                    return method.CreateDelegate(delegateType, target);
+                }
+                else
+                {
+                    return new ExportedDelegate(target, method);
+                }
             }
 
             throw new NotSupportedException();
@@ -479,7 +486,9 @@
                 }
             }
 
-            Func<object> result = () => valueFactory(this, provisionalSharedObjects, nonSharedInstanceRequired);
+            Func<object> result = valueFactory != null
+                ? (() => valueFactory(this, provisionalSharedObjects, nonSharedInstanceRequired))
+                : DelegateServices.FromValue<object>(null);
 
             if (!nonSharedInstanceRequired)
             {
@@ -585,7 +594,7 @@
                     {
                         if (!metadataBuilder.ContainsKey(property.Name))
                         {
-                            var defaultValueAttribute = property.GetCustomAttributesCached<DefaultValueAttribute>().FirstOrDefault();
+                            var defaultValueAttribute = property.GetFirstAttribute<DefaultValueAttribute>();
                             if (defaultValueAttribute != null)
                             {
                                 metadataBuilder.Add(property.Name, defaultValueAttribute.Value);
@@ -615,6 +624,19 @@
 
             object value = metadata.GetValueOrDefault("OrderPrecedence");
             return value is int ? (int)value : 0;
+        }
+
+        private static T CastValueTo<T>(object value)
+        {
+            if (value is ExportedDelegate && typeof(Delegate).IsAssignableFrom(typeof(T)))
+            {
+                var exportedDelegate = (ExportedDelegate)value;
+                return (T)(object)exportedDelegate.CreateDelegate(typeof(T));
+            }
+            else
+            {
+                return (T)value;
+            }
         }
 
         private bool TryGetProvisionalSharedExport(IReadOnlyDictionary<TypeRef, object> provisionalSharedObjects, TypeRef partTypeRef, out object value)
@@ -647,12 +669,12 @@
             IEnumerable<Export> results = this.GetExports(importDefinition);
 
             return results.Select(result => new Lazy<T, TMetadataView>(
-                () => (T)result.Value,
+                () => CastValueTo<T>(result.Value),
                 (TMetadataView)metadataViewProvider.CreateProxy(
                     result.Metadata,
                     GetMetadataViewDefaults(typeof(TMetadataView)),
                     typeof(TMetadataView))))
-                .ToImmutableHashSet();
+                .ToArray();
         }
 
         private ImmutableArray<Lazy<IMetadataViewProvider, IReadOnlyDictionary<string, object>>> GetMetadataViewProviderExtensions()

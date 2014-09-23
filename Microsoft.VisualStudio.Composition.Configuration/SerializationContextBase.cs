@@ -1,4 +1,9 @@
-﻿namespace Microsoft.VisualStudio.Composition
+﻿#if DEBUG
+////#define TRACESTATS
+////#define TRACESERIALIZATION
+#endif
+
+namespace Microsoft.VisualStudio.Composition
 {
     using System;
     using System.Collections.Generic;
@@ -15,8 +20,6 @@
 
     internal abstract class SerializationContextBase
     {
-        private static readonly char[] StringSegmentSeparator = { '.' };
-
         protected BinaryReader reader;
 
         protected BinaryWriter writer;
@@ -29,34 +32,83 @@
 
         protected Dictionary<string, int> sizeStats;
 
+        private readonly ImmutableDictionary<string, object>.Builder metadataBuilder = ImmutableDictionary.CreateBuilder<string, object>();
+
+        private long objectTableCapacityStreamPosition = -1; // -1 indicates the stream isn't capable of seeking.
+
         internal SerializationContextBase(BinaryReader reader)
         {
             Requires.NotNull(reader, "reader");
             this.reader = reader;
-            this.deserializingObjectTable = new Dictionary<uint, object>();
+
+            // At the head of the stream, read in the estimated or actual size of the object table we will require.
+            // This reduces GC pressure and time spent resizing the object table during deserialization.
+            int objectTableCapacity = reader.ReadInt32();
+            int objectTableSafeCapacity = Math.Min(objectTableCapacity, 1000000); // protect against OOM in case of data corruption.
+            this.deserializingObjectTable = new Dictionary<uint, object>(objectTableSafeCapacity);
         }
 
-        internal SerializationContextBase(BinaryWriter writer)
+        internal SerializationContextBase(BinaryWriter writer, int estimatedObjectCount)
         {
             Requires.NotNull(writer, "writer");
             this.writer = writer;
-            this.serializingObjectTable = new Dictionary<object, uint>(SmartInterningEqualityComparer.Default);
+            this.serializingObjectTable = new Dictionary<object, uint>(estimatedObjectCount, SmartInterningEqualityComparer.Default);
+#if TRACESTATS
             this.sizeStats = new Dictionary<string, int>();
+#endif
+
+            // Don't use compressed uint here. It must be a fixed size because we *may*
+            // come back and rewrite this at the end of serialization if this stream is seekable.
+            // Otherwise, we'll leave it at our best estimate given the size of the data being serialized.
+            Stream writerStream = writer.BaseStream;
+            this.objectTableCapacityStreamPosition = writerStream.CanSeek ? writer.BaseStream.Position : -1;
+            this.writer.Write(estimatedObjectCount);
         }
 
-        protected SerializationTrace Trace(string elementName, Stream stream)
+        protected internal void FinalizeObjectTableCapacity()
         {
-            return new SerializationTrace(this, elementName, stream);
+            Verify.Operation(this.writer != null, "Only supported on write operations.");
+
+            // For efficiency in deserialization, go back and write the actual number of objects
+            // in the object table so the deserializer can allocate space up front and avoid dictionary resizing
+            // which can otherwise produce a *lot* of garbage.
+            // We can only do this on streams that support seeking.
+            if (this.objectTableCapacityStreamPosition >= 0)
+            {
+                // Always flush the writer before repositioning the stream to avoid corrupting data.
+                writer.Flush();
+                Stream writerStream = writer.BaseStream;
+
+                // Reposition the stream to the point at which we wrote out our estimated required capacity.
+                long tailPosition = writerStream.Position;
+                writerStream.Position = this.objectTableCapacityStreamPosition;
+
+                // Overwrite the estimate with the actual size.
+                this.writer.Write(this.serializingObjectTable.Count);
+
+                // Reposition the stream back to the end of our own serialization.
+                this.writer.Flush();
+                writerStream.Position = tailPosition;
+            }
         }
 
-        protected SerializationTrace Trace(string elementName)
+        protected SerializationTrace Trace(string elementName, bool isArray = false)
         {
-            return new SerializationTrace(this, elementName, reader != null ? reader.BaseStream : writer.BaseStream);
+            Stream stream = null;
+#if TRACESERIALIZATION || TRACESTATS
+            // It turns out that acquiring the stream is very expensive because
+            // each time you get it, the writer is flushed. Since we use the stream
+            // for its Position, flushing is actually important. But it's very slow,
+            // so don't do it in production.
+            stream = reader != null ? reader.BaseStream : writer.BaseStream;
+#endif
+
+            return new SerializationTrace(this, elementName, isArray, stream);
         }
 
         protected void Write(MethodRef methodRef)
         {
-            using (Trace("MethodRef", writer.BaseStream))
+            using (Trace("MethodRef"))
             {
                 if (methodRef.IsEmpty)
                 {
@@ -74,7 +126,7 @@
 
         protected MethodRef ReadMethodRef()
         {
-            using (Trace("MethodRef", reader.BaseStream))
+            using (Trace("MethodRef"))
             {
                 byte nullCheck = reader.ReadByte();
                 if (nullCheck == 1)
@@ -93,7 +145,7 @@
 
         protected void Write(MemberRef memberRef)
         {
-            using (Trace("MemberRef", writer.BaseStream))
+            using (Trace("MemberRef"))
             {
                 if (memberRef.IsConstructor)
                 {
@@ -124,7 +176,7 @@
 
         protected MemberRef ReadMemberRef()
         {
-            using (Trace("MemberRef", reader.BaseStream))
+            using (Trace("MemberRef"))
             {
                 int kind = reader.ReadByte();
                 switch (kind)
@@ -147,7 +199,7 @@
 
         protected void Write(PropertyRef propertyRef)
         {
-            using (Trace("PropertyRef", writer.BaseStream))
+            using (Trace("PropertyRef"))
             {
                 this.Write(propertyRef.DeclaringType);
                 this.WriteCompressedMetadataToken(propertyRef.MetadataToken, MetadataTokenType.Property);
@@ -171,7 +223,7 @@
 
         protected PropertyRef ReadPropertyRef()
         {
-            using (Trace("PropertyRef", reader.BaseStream))
+            using (Trace("PropertyRef"))
             {
                 var declaringType = this.ReadTypeRef();
                 var metadataToken = this.ReadCompressedMetadataToken(MetadataTokenType.Property);
@@ -198,7 +250,7 @@
 
         protected void Write(FieldRef fieldRef)
         {
-            using (Trace("FieldRef", writer.BaseStream))
+            using (Trace("FieldRef"))
             {
                 writer.Write(!fieldRef.IsEmpty);
                 if (!fieldRef.IsEmpty)
@@ -211,7 +263,7 @@
 
         protected FieldRef ReadFieldRef()
         {
-            using (Trace("FieldRef", reader.BaseStream))
+            using (Trace("FieldRef"))
             {
                 if (reader.ReadBoolean())
                 {
@@ -228,7 +280,7 @@
 
         protected void Write(ParameterRef parameterRef)
         {
-            using (Trace("ParameterRef", writer.BaseStream))
+            using (Trace("ParameterRef"))
             {
                 writer.Write(!parameterRef.IsEmpty);
                 if (!parameterRef.IsEmpty)
@@ -242,7 +294,7 @@
 
         protected ParameterRef ReadParameterRef()
         {
-            using (Trace("ParameterRef", reader.BaseStream))
+            using (Trace("ParameterRef"))
             {
                 if (reader.ReadBoolean())
                 {
@@ -274,7 +326,7 @@
         protected void Write(ConstructorRef constructorRef)
         {
             Requires.Argument(!constructorRef.IsEmpty, "constructorRef", "Cannot be empty.");
-            using (Trace("ConstructorRef", writer.BaseStream))
+            using (Trace("ConstructorRef"))
             {
                 this.Write(constructorRef.DeclaringType);
                 this.WriteCompressedMetadataToken(constructorRef.MetadataToken, MetadataTokenType.Method);
@@ -283,7 +335,7 @@
 
         protected ConstructorRef ReadConstructorRef()
         {
-            using (Trace("ConstructorRef", reader.BaseStream))
+            using (Trace("ConstructorRef"))
             {
                 var declaringType = this.ReadTypeRef();
                 var metadataToken = this.ReadCompressedMetadataToken(MetadataTokenType.Method);
@@ -294,24 +346,49 @@
             }
         }
 
+        [Flags]
+        private enum TypeRefFlags : byte
+        {
+            None = 0x0,
+            IsArray = 0x1,
+            HasGenericParameterDeclaringMember = 0x8,
+            HasGenericParameterDeclaringMemberIndex = 0x10,
+        }
+
         protected void Write(TypeRef typeRef)
         {
-            using (Trace("TypeRef", writer.BaseStream))
+            using (Trace("TypeRef"))
             {
                 if (this.TryPrepareSerializeReusableObject(typeRef))
                 {
                     this.Write(typeRef.AssemblyName);
                     this.WriteCompressedMetadataToken(typeRef.MetadataToken, MetadataTokenType.Type);
-                    writer.Write(typeRef.IsArray);
-                    writer.Write((byte)typeRef.GenericTypeParameterCount);
+
+                    var flags = TypeRefFlags.None;
+                    flags |= typeRef.IsArray ? TypeRefFlags.IsArray : TypeRefFlags.None;
+                    flags |= !typeRef.GenericParameterDeclaringMember.IsEmpty ? TypeRefFlags.HasGenericParameterDeclaringMember : TypeRefFlags.None;
+                    flags |= typeRef.GenericParameterDeclaringMemberIndex >= 0 ? TypeRefFlags.HasGenericParameterDeclaringMemberIndex : TypeRefFlags.None;
+                    writer.Write((byte)flags);
+
+                    this.WriteCompressedUInt((uint)typeRef.GenericTypeParameterCount);
                     this.Write(typeRef.GenericTypeArguments, this.Write);
+
+                    if (!typeRef.GenericParameterDeclaringMember.IsEmpty)
+                    {
+                        this.Write(typeRef.GenericParameterDeclaringMember);
+                    }
+
+                    if (typeRef.GenericParameterDeclaringMemberIndex >= 0)
+                    {
+                        this.WriteCompressedUInt((uint)typeRef.GenericParameterDeclaringMemberIndex);
+                    }
                 }
             }
         }
 
         protected TypeRef ReadTypeRef()
         {
-            using (Trace("TypeRef", reader.BaseStream))
+            using (Trace("TypeRef"))
             {
                 uint id;
                 TypeRef value;
@@ -319,10 +396,20 @@
                 {
                     var assemblyName = this.ReadAssemblyName();
                     var metadataToken = this.ReadCompressedMetadataToken(MetadataTokenType.Type);
-                    bool isArray = reader.ReadBoolean();
-                    int genericTypeParameterCount = reader.ReadByte();
-                    var genericTypeArguments = this.ReadList(reader, this.ReadTypeRef);
-                    value = TypeRef.Get(assemblyName, metadataToken, isArray, genericTypeParameterCount, genericTypeArguments.ToImmutableArray());
+                    var flags = (TypeRefFlags)reader.ReadByte();
+                    int genericTypeParameterCount = (int)this.ReadCompressedUInt();
+                    var genericTypeArguments = this.ReadList(reader, this.ReadTypeRef).ToImmutableArray();
+                    var genericParameterDeclaringMember = flags.HasFlag(TypeRefFlags.HasGenericParameterDeclaringMember) ? this.ReadMemberRef() : default(MemberRef);
+                    var genericParameterDeclaringMemberIndex = flags.HasFlag(TypeRefFlags.HasGenericParameterDeclaringMemberIndex) ? (int)this.ReadCompressedUInt() : -1;
+                    if (genericParameterDeclaringMember.IsEmpty)
+                    {
+                        value = TypeRef.Get(assemblyName, metadataToken, flags.HasFlag(TypeRefFlags.IsArray), genericTypeParameterCount, genericTypeArguments);
+                    }
+                    else
+                    {
+                        value = TypeRef.Get(assemblyName, metadataToken, flags.HasFlag(TypeRefFlags.IsArray), genericTypeParameterCount, genericTypeArguments, genericParameterDeclaringMember, genericParameterDeclaringMemberIndex);
+                    }
+
                     this.OnDeserializedReusableObject(id, value);
                 }
 
@@ -332,7 +419,7 @@
 
         protected void Write(AssemblyName assemblyName)
         {
-            using (Trace("AssemblyName", writer.BaseStream))
+            using (Trace("AssemblyName"))
             {
                 if (this.TryPrepareSerializeReusableObject(assemblyName))
                 {
@@ -344,7 +431,7 @@
 
         protected AssemblyName ReadAssemblyName()
         {
-            using (Trace("AssemblyName", reader.BaseStream))
+            using (Trace("AssemblyName"))
             {
                 uint id;
                 AssemblyName value;
@@ -362,57 +449,28 @@
 
         protected void Write(string value)
         {
-            using (Trace("String", writer.BaseStream))
+            using (Trace("String"))
             {
-                if (value != null)
+                if (this.TryPrepareSerializeReusableObject(value))
                 {
-                    string[] segments = value.Split(StringSegmentSeparator);
-                    this.WriteCompressedUInt((uint)segments.Length);
-                    foreach (string segment in segments)
-                    {
-                        if (this.TryPrepareSerializeReusableObject(segment))
-                        {
-                            writer.Write(segment);
-                        }
-                    }
-                }
-                else
-                {
-                    this.WriteCompressedUInt(0);
+                    writer.Write(value);
                 }
             }
         }
 
         protected string ReadString()
         {
-            using (Trace("String", reader.BaseStream))
+            using (Trace("String"))
             {
-                uint segmentsCount = this.ReadCompressedUInt();
-                if (segmentsCount == 0)
+                uint id;
+                string value;
+                if (this.TryPrepareDeserializeReusableObject(out id, out value))
                 {
-                    return null;
+                    value = reader.ReadString();
+                    this.OnDeserializedReusableObject(id, value);
                 }
 
-                var builder = new StringBuilder();
-                for (int i = 0; i < segmentsCount; i++)
-                {
-                    if (i > 0)
-                    {
-                        builder.Append(StringSegmentSeparator[0]);
-                    }
-
-                    uint id;
-                    string value;
-                    if (this.TryPrepareDeserializeReusableObject(out id, out value))
-                    {
-                        value = reader.ReadString();
-                        this.OnDeserializedReusableObject(id, value);
-                    }
-
-                    builder.Append(value);
-                }
-
-                return builder.ToString();
+                return value;
             }
         }
 
@@ -429,7 +487,7 @@
         protected void Write<T>(IReadOnlyCollection<T> list, Action<T> itemWriter)
         {
             Requires.NotNull(list, "list");
-            using (Trace("List<" + typeof(T).Name + ">", writer.BaseStream))
+            using (Trace("List<" + typeof(T).Name + ">"))
             {
                 this.WriteCompressedUInt((uint)list.Count);
                 foreach (var item in list)
@@ -442,7 +500,7 @@
         protected void Write(Array list, Action<object> itemWriter)
         {
             Requires.NotNull(list, "list");
-            using (Trace((list != null ? list.GetType().GetElementType().Name : "null") + "[]", writer.BaseStream))
+            using (Trace((list != null ? list.GetType().GetElementType().Name : "null") + "[]"))
             {
                 this.WriteCompressedUInt((uint)list.Length);
                 foreach (var item in list)
@@ -459,7 +517,7 @@
 
         protected IReadOnlyList<T> ReadList<T>(BinaryReader reader, Func<T> itemReader)
         {
-            using (Trace("List<" + typeof(T).Name + ">", reader.BaseStream))
+            using (Trace(typeof(T).Name, isArray: true))
             {
                 uint count = this.ReadCompressedUInt();
                 if (count > 0xffff)
@@ -481,7 +539,7 @@
 
         protected Array ReadArray(BinaryReader reader, Func<object> itemReader, Type elementType)
         {
-            using (Trace("List<" + elementType.Name + ">", reader.BaseStream))
+            using (Trace(elementType.Name, isArray: true))
             {
                 uint count = this.ReadCompressedUInt();
                 if (count > 0xffff)
@@ -504,7 +562,7 @@
 
         protected void Write(IReadOnlyDictionary<string, object> metadata)
         {
-            using (Trace("Metadata", writer.BaseStream))
+            using (Trace("Metadata"))
             {
                 this.WriteCompressedUInt((uint)metadata.Count);
 
@@ -521,7 +579,7 @@
 
         protected IReadOnlyDictionary<string, object> ReadMetadata()
         {
-            using (Trace("Metadata", reader.BaseStream))
+            using (Trace("Metadata"))
             {
                 // PERF TIP: if ReadMetadata shows up on startup perf traces,
                 // we could simply read the blob containing the metadata into a byte[]
@@ -536,7 +594,7 @@
 
                 if (count > 0)
                 {
-                    var builder = metadata.ToBuilder();
+                    var builder = this.metadataBuilder; // reuse builder to save on GC pressure
                     for (int i = 0; i < count; i++)
                     {
                         string key = this.ReadString();
@@ -545,6 +603,7 @@
                     }
 
                     metadata = builder.ToImmutable();
+                    builder.Clear(); // clean up for the next user.
                 }
 
                 return new LazyMetadataWrapper(metadata, LazyMetadataWrapper.Direction.ToOriginalValue);
@@ -553,7 +612,7 @@
 
         protected void Write(ImportCardinality cardinality)
         {
-            using (Trace("ImportCardinality", writer.BaseStream))
+            using (Trace("ImportCardinality"))
             {
                 writer.Write((byte)cardinality);
             }
@@ -561,7 +620,7 @@
 
         protected ImportCardinality ReadImportCardinality()
         {
-            using (Trace("ImportCardinality", reader.BaseStream))
+            using (Trace("ImportCardinality"))
             {
                 return (ImportCardinality)reader.ReadByte();
             }
@@ -646,7 +705,7 @@
         {
             if (value == null)
             {
-                using (Trace("Object (null)", writer.BaseStream))
+                using (Trace("Object (null)"))
                 {
                     this.Write(ObjectType.Null);
                 }
@@ -654,7 +713,7 @@
             else
             {
                 Type valueType = value.GetType();
-                using (Trace("Object (" + valueType.Name + ")", writer.BaseStream))
+                using (Trace("Object (" + valueType.Name + ")"))
                 {
                     if (valueType.IsArray)
                     {
@@ -736,7 +795,7 @@
 
         protected object ReadObject()
         {
-            using (Trace("Object", reader.BaseStream))
+            using (Trace("Object"))
             {
                 ObjectType objectType = this.ReadObjectType();
                 switch (objectType)
@@ -811,17 +870,19 @@
             private const string Indent = "  ";
             private readonly SerializationContextBase context;
             private readonly string elementName;
+            private readonly bool isArray;
             private readonly Stream stream;
             private readonly int startStreamPosition;
 
-            internal SerializationTrace(SerializationContextBase context, string elementName, Stream stream)
+            internal SerializationTrace(SerializationContextBase context, string elementName, bool isArray, Stream stream)
             {
                 this.context = context;
                 this.elementName = elementName;
+                this.isArray = isArray;
                 this.stream = stream;
 
                 this.context.indentationLevel++;
-                this.startStreamPosition = (int)stream.Position;
+                this.startStreamPosition = stream != null ? (int)stream.Position : 0;
 
 #if DEBUG && TRACESERIALIZATION
                     for (int i = 0; i < this.context.indentationLevel; i++)
@@ -829,7 +890,7 @@
                         Debug.Write(Indent);
                     }
 
-                    Debug.WriteLine("Serialization: {1,7} {0}", elementName, stream.Position);
+                    Debug.WriteLine("Serialization: {2,7} {0}{1}", elementName, isArray ? "[]" : string.Empty, stream.Position);
 #endif
             }
 
@@ -837,10 +898,14 @@
             {
                 this.context.indentationLevel--;
 
-                if (this.context.sizeStats != null)
+                if (this.stream != null)
                 {
-                    int length = (int)this.stream.Position - startStreamPosition;
-                    this.context.sizeStats[this.elementName] = this.context.sizeStats.GetValueOrDefault(this.elementName) + length;
+                    if (this.context.sizeStats != null)
+                    {
+                        int length = (int)this.stream.Position - startStreamPosition;
+                        string elementNameWitharray = this.isArray ? (this.elementName + "[]") : this.elementName;
+                        this.context.sizeStats[elementNameWitharray] = this.context.sizeStats.GetValueOrDefault(elementNameWitharray) + length;
+                    }
                 }
             }
         }

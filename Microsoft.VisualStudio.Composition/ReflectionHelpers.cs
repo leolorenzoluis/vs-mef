@@ -5,6 +5,7 @@
     using System.Collections.Immutable;
     using System.Globalization;
     using System.Linq;
+    using System.Linq.Expressions;
     using System.Reflection;
     using System.Runtime.InteropServices;
     using System.Text;
@@ -14,8 +15,6 @@
     public static class ReflectionHelpers
     {
         private static readonly Assembly mscorlib = typeof(int).GetTypeInfo().Assembly;
-
-        internal static readonly ReflectionCache Cache = new ReflectionCache();
 
         /// <summary>
         /// Creates a <see cref="Func{T}"/> delegate for a given <see cref="Func{Object}"/> delegate.
@@ -120,111 +119,9 @@
             }
         }
 
-        /// <summary>
-        /// Produces a sequence of attributes, grouped by the type that they are declared on.
-        /// The first group of attributes are those found on the type itself.
-        /// Each successive group contains the set of attributes on the next type up the inheritance hierarchy.
-        /// After walking up the type hierarchy, all attributes on interfaces are produced.
-        /// </summary>
-        /// <typeparam name="T">The type of attribute sought for.</typeparam>
-        /// <param name="type">The type to being searching for attributes to be applied to.</param>
-        /// <returns>A sequence of groups.</returns>
-        internal static IEnumerable<IGrouping<Type, T>> GetCustomAttributesByType<T>(this Type type)
-            where T : Attribute
-        {
-            Requires.NotNull(type, "type");
-
-            var byType = from t in EnumTypeAndBaseTypes(type)
-                         from attribute in Cache.GetCustomAttributes(t.GetTypeInfo()).OfType<T>()
-                         group attribute by t into attributesByType
-                         select attributesByType;
-            foreach (var group in byType)
-            {
-                yield return group;
-            }
-
-            var byInterface = from t in type.GetTypeInfo().ImplementedInterfaces
-                              from attribute in Cache.GetCustomAttributes(t.GetTypeInfo()).OfType<T>()
-                              group attribute by t into attributesByType
-                              select attributesByType;
-            foreach (var group in byInterface)
-            {
-                yield return group;
-            }
-        }
-
-        internal static ImmutableArray<Attribute> GetCustomAttributesCached(this MemberInfo member)
-        {
-            return Cache.GetCustomAttributes(member);
-        }
-
-        internal static ImmutableArray<Attribute> GetCustomAttributesCached(this ParameterInfo parameter)
-        {
-            return Cache.GetCustomAttributes(parameter);
-        }
-
-        internal static AttributeUsageAttribute GetAttributeUsage(Type attributeType)
-        {
-            Requires.NotNull(attributeType, "attributeType");
-
-            return attributeType.EnumTypeAndBaseTypes().SelectMany(t => t.GetTypeInfo().GetCustomAttributesCached<AttributeUsageAttribute>()).FirstOrDefault();
-        }
-
-        internal static IEnumerable<T> GetCustomAttributesCached<T>(this MemberInfo member)
-            where T : Attribute
-        {
-            return Cache.GetCustomAttributes(member).OfType<T>();
-        }
-
         internal static IEnumerable<PropertyInfo> WherePublicInstance(this IEnumerable<PropertyInfo> infos)
         {
             return infos.Where(p => p.GetMethod.IsPublicInstance() || p.SetMethod.IsPublicInstance());
-        }
-
-        internal static IEnumerable<FieldInfo> EnumFields(this Type type)
-        {
-            Requires.NotNull(type, "type");
-
-            // We look at each type in the hierarchy for their individual properties.
-            // This allows us to find private property setters defined on base classes,
-            // which otherwise we are unable to see.
-            var types = new List<Type> { type };
-            if (type.GetTypeInfo().IsInterface)
-            {
-                types.AddRange(type.GetTypeInfo().ImplementedInterfaces);
-            }
-            else
-            {
-                while (type != null)
-                {
-                    type = type.GetTypeInfo().BaseType;
-                    if (type != null)
-                    {
-                        types.Add(type);
-                    }
-                }
-            }
-
-            return types.SelectMany(t => t.GetTypeInfo().DeclaredFields);
-        }
-
-        internal static bool HasParameters(this ConstructorInfo ctor, Type[] parameterTypes)
-        {
-            var p = ctor.GetParameters();
-            if (p.Length != parameterTypes.Length)
-            {
-                return false;
-            }
-
-            for (int i = 0; i < p.Length; i++)
-            {
-                if (!p[i].ParameterType.Equals(parameterTypes[i]))
-                {
-                    return false;
-                }
-            }
-
-            return true;
         }
 
         internal static bool IsStatic(this MemberInfo exportingMember)
@@ -249,15 +146,33 @@
             var exportingProperty = exportingMember as PropertyInfo;
             if (exportingProperty != null)
             {
-                return exportingProperty.GetMethod.IsStatic;
+                return (exportingProperty.GetMethod ?? exportingProperty.SetMethod).IsStatic;
             }
 
             throw new NotSupportedException();
         }
 
-        internal static Type GetMemberType(MemberInfo fieldOrProperty)
+        internal static Type GetMemberType(MemberInfo fieldOrPropertyOrType)
         {
-            return Cache.GetMemberType(fieldOrProperty);
+            var type = fieldOrPropertyOrType as Type;
+            if (type != null)
+            {
+                return type;
+            }
+
+            var property = fieldOrPropertyOrType as PropertyInfo;
+            if (property != null)
+            {
+                return property.PropertyType;
+            }
+
+            var field = fieldOrPropertyOrType as FieldInfo;
+            if (field != null)
+            {
+                return field.FieldType;
+            }
+
+            throw new ArgumentException("Unexpected member type.");
         }
 
         internal static bool IsPublicInstance(this MethodInfo methodInfo)
@@ -471,7 +386,7 @@
             {
                 // TypeIdentifierAttribute signifies an embeddED type.
                 // ComImportAttribute suggests an embeddABLE type.
-                if (typeInfo.GetCustomAttributesCached<TypeIdentifierAttribute>().Any() && typeInfo.GetCustomAttributesCached<GuidAttribute>().Any())
+                if (typeInfo.IsAttributeDefined<TypeIdentifierAttribute>() && typeInfo.IsAttributeDefined<GuidAttribute>())
                 {
                     return true;
                 }
@@ -484,7 +399,7 @@
         {
             Requires.NotNull(assembly, "assembly");
 
-            return Cache.GetCustomAttributes(assembly)
+            return assembly.GetCustomAttributes()
                 .Any(a => a.GetType().FullName == "System.Runtime.InteropServices.PrimaryInteropAssemblyAttribute"
                     || a.GetType().FullName == "System.Runtime.InteropServices.ImportedFromTypeLibAttribute");
         }
@@ -528,26 +443,19 @@
 
         internal static Type GetContractTypeForDelegate(MethodInfo method)
         {
-            Type genericTypeDefinition;
-            int parametersCount = method.GetParameters().Length;
-            var typeArguments = method.GetParameters().Select(p => p.ParameterType).ToList();
-            var voidResult = method.ReturnType.Equals(typeof(void));
-            if (voidResult)
-            {
-                if (typeArguments.Count == 0)
-                {
-                    return typeof(Action);
-                }
+            Requires.NotNull(method, "method");
 
-                genericTypeDefinition = Type.GetType("System.Action`" + typeArguments.Count);
-            }
-            else
+            ParameterInfo[] parameters = method.GetParameters();
+
+            // This array should contains a lit of all argument types, and the last one is the return type (could be void)
+            Type[] parameterTypes = new Type[parameters.Length + 1];
+            parameterTypes[parameters.Length] = method.ReturnType;
+            for (int i = 0; i < parameters.Length; i++)
             {
-                typeArguments.Add(method.ReturnType);
-                genericTypeDefinition = Type.GetType("System.Func`" + typeArguments.Count);
+                parameterTypes[i] = parameters[i].ParameterType;
             }
 
-            return genericTypeDefinition.MakeGenericType(typeArguments.ToArray());
+            return Expression.GetDelegateType(parameterTypes);
         }
 
         internal static Attribute Instantiate(this CustomAttributeData attributeData)
@@ -568,6 +476,14 @@
             }
 
             return attribute;
+        }
+
+        internal static void GetInputAssembliesFromMetadata(ISet<AssemblyName> assemblies, IReadOnlyDictionary<string, object> metadata)
+        {
+            Requires.NotNull(assemblies, "assemblies");
+            Requires.NotNull(metadata, "metadata");
+
+            // TODO: code here
         }
 
         private static string FilterTypeNameForGenericTypeDefinition(Type type, bool fullName)

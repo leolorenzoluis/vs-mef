@@ -20,9 +20,11 @@
             Requires.NotNull(satisfyingExports, "satisfyingExports");
             Requires.NotNull(requiredSharingBoundaries, "requiredSharingBoundaries");
 
+#if DEBUG   // These checks are expensive. Don't do them in production.
             // Make sure we have entries for every import.
             Requires.Argument(satisfyingExports.Count == definition.Imports.Count() && definition.Imports.All(d => satisfyingExports.ContainsKey(d)), "satisfyingExports", "There should be exactly one entry for every import.");
             Requires.Argument(satisfyingExports.All(kv => kv.Value != null), "satisfyingExports", "All values must be non-null.");
+#endif
 
             this.Definition = definition;
             this.SatisfyingExports = satisfyingExports;
@@ -61,6 +63,19 @@
                 !this.Definition.Equals(ExportProvider.ExportProviderPartDefinition))
             {
                 yield return new ComposedPartDiagnostic(this, "{0}: Export of ExportProvider is not allowed.", this.Definition.Type.FullName);
+            }
+
+            var importsWithGenericTypeParameters = this.Definition.Imports
+                .Where(import => import.ImportingSiteElementType.ContainsGenericParameters);
+            if (importsWithGenericTypeParameters.Any())
+            {
+                foreach (var import in importsWithGenericTypeParameters)
+                {
+                    yield return new ComposedPartDiagnostic(
+                        this,
+                        "{0}: imports that use generic type parameters are not supported.",
+                        GetDiagnosticLocation(import));
+                }
             }
 
             foreach (var pair in this.SatisfyingExports)

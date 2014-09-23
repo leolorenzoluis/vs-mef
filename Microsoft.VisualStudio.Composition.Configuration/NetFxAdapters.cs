@@ -62,8 +62,7 @@
             return catalog
                 .WithPart(metadataViewImplProxyPart)
                 .WithPart(assemblyNameCodeBasePathPath)
-                .WithMetadataViewEmitProxySupport()
-                .WithMetadataViewProxySupport();
+                .WithMetadataViewEmitProxySupport();
         }
 
         private class MefV1ExportProvider : MefV1.Hosting.ExportProvider
@@ -206,7 +205,20 @@
                 return new MefV1.Primitives.Export(
                     export.Definition.ContractName,
                     metadata,
-                    () => export.Value);
+                    () => UnwrapExportedValue(export.Value));
+            }
+
+            private static object UnwrapExportedValue(object value)
+            {
+                if (value is ExportedDelegate)
+                {
+                    var del = ((ExportedDelegate)value).CreateDelegate(typeof(Delegate));
+                    return new MefV1.Primitives.ExportedDelegate(del.Target, del.Method);
+                }
+                else
+                {
+                    return value;
+                }
             }
 
             private class ComposablePartForExportFactory : MefV1.Primitives.ComposablePart, IDisposable
@@ -312,6 +324,7 @@
 
         // The part creation policy is NonShared so that it can satisfy exports within any sharing boundary.
         [MefV1.Export(typeof(MefV1.ICompositionService)), MefV1.PartCreationPolicy(MefV1.CreationPolicy.NonShared)]
+        [MefV1.PartMetadata(CompositionConstants.DgmlCategoryPartMetadataName, new string[] { "VsMEFBuiltIn" })]
         private class CompositionService : MefV1.ICompositionService, IDisposable
         {
             private MefV1.Hosting.CompositionContainer container;
@@ -336,6 +349,7 @@
 
         [MefV1.Export(typeof(IMetadataViewProvider))]
         [MefV1.ExportMetadata("OrderPrecedence", 100)] // should take precedence over the transparent or emitted proxy providers
+        [MefV1.PartMetadata(CompositionConstants.DgmlCategoryPartMetadataName, new string[] { "VsMEFBuiltIn" })]
         private class MetadataViewImplProxy : IMetadataViewProvider
         {
             public bool IsMetadataViewSupported(Type metadataType)
@@ -352,8 +366,7 @@
             private static ConstructorInfo FindImplClassConstructor(Type metadataType)
             {
                 Requires.NotNull(metadataType, "metadataType");
-                var attr = metadataType.GetCustomAttributesCached<MefV1.MetadataViewImplementationAttribute>()
-                    .FirstOrDefault();
+                var attr = metadataType.GetFirstAttribute<MefV1.MetadataViewImplementationAttribute>();
                 if (attr != null)
                 {
                     if (metadataType.IsAssignableFrom(attr.ImplementationType))
@@ -377,6 +390,7 @@
         /// </summary>
         [MefV1.Export(typeof(IAssemblyLoader))]
         [MefV1.ExportMetadata("OrderPrecedence", 100)] // should take precedence over one without codebase path handling
+        [MefV1.PartMetadata(CompositionConstants.DgmlCategoryPartMetadataName, new string[] { "VsMEFBuiltIn" })]
         private class AssemblyLoadCodeBasePathLoader : IAssemblyLoader
         {
             public Assembly LoadAssembly(string assemblyFullName, string codeBasePath)

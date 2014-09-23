@@ -6,6 +6,7 @@
     using System.Diagnostics;
     using System.IO;
     using System.Linq;
+    using System.Reflection;
     using System.Text;
     using System.Threading.Tasks;
     using Validation;
@@ -19,7 +20,11 @@
             Requires.NotNull(metadata, "metadata");
 
             this.ContractName = contractName;
-            this.Metadata = ImmutableDictionary.CreateRange(metadata);
+
+            // Don't call ToImmutableDictionary() on the metadata. We have to trust that it's immutable
+            // because forcing it to be immutable can defeat LazyMetadataWrapper's laziness, forcing
+            // assembly loads and copying a dictionary when it's for practical interests immutable underneath anyway.
+            this.Metadata = metadata;
         }
 
         public string ContractName { get; private set; }
@@ -60,6 +65,13 @@
                     indentingWriter.WriteLine("{0} = {1}", item.Key, item.Value);
                 }
             }
+        }
+
+        internal void GetInputAssemblies(ISet<AssemblyName> assemblies)
+        {
+            Requires.NotNull(assemblies, "assemblies");
+
+            ReflectionHelpers.GetInputAssembliesFromMetadata(assemblies, this.Metadata);
         }
     }
 }

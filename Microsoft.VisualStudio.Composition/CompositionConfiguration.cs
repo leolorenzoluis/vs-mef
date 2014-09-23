@@ -40,7 +40,6 @@
             this.Parts = parts;
             this.MetadataViewsAndProviders = metadataViewsAndProviders;
             this.CompositionErrors = compositionErrors;
-            this.AdditionalReferenceAssemblies = ImmutableHashSet<Assembly>.Empty;
             this.effectiveSharingBoundaryOverrides = effectiveSharingBoundaryOverrides;
         }
 
@@ -60,8 +59,6 @@
         /// Gets a map of metadata views and their matching providers.
         /// </summary>
         public IReadOnlyDictionary<Type, ExportDefinitionBinding> MetadataViewsAndProviders { get; private set; }
-
-        public ImmutableHashSet<Assembly> AdditionalReferenceAssemblies { get; private set; }
 
         /// <summary>
         /// Gets the compositional errors detected while creating this configuration that led to the removal
@@ -84,7 +81,8 @@
             var customizedCatalog = catalog.WithParts(AlwaysBundledParts);
 
             // Construct our part builders, initialized with all their imports satisfied.
-            var partBuilders = new Dictionary<ComposablePartDefinition, PartBuilder>();
+            // We explicitly use reference equality because ComposablePartDefinition.Equals is too slow, and unnecessary for this.
+            var partBuilders = new Dictionary<ComposablePartDefinition, PartBuilder>(ReferenceEquality<ComposablePartDefinition>.Default);
             foreach (ComposablePartDefinition partDefinition in customizedCatalog.Parts)
             {
                 var satisfyingImports = partDefinition.Imports.ToImmutableDictionary(i => i, i => customizedCatalog.GetExports(i.ImportDefinition));
@@ -98,7 +96,7 @@
                     (from entry in partBuilder.SatisfyingExports
                      where !entry.Key.IsExportFactory
                      from export in entry.Value
-                     select export.PartDefinition).Distinct();
+                     select export.PartDefinition).Distinct(ReferenceEquality<ComposablePartDefinition>.Default);
                 foreach (var importedPartDefinition in importedPartsExcludingFactories)
                 {
                     var importedPartBuilder = partBuilders[importedPartDefinition];
@@ -217,16 +215,6 @@
         {
             var composition = RuntimeComposition.CreateRuntimeComposition(this);
             return new RuntimeExportProviderFactory(composition);
-        }
-
-        public CompositionConfiguration WithReferenceAssemblies(ImmutableHashSet<Assembly> additionalReferenceAssemblies)
-        {
-            Requires.NotNull(additionalReferenceAssemblies, "additionalReferenceAssemblies");
-
-            return new CompositionConfiguration(this.Catalog, this.Parts, this.MetadataViewsAndProviders, this.CompositionErrors, this.effectiveSharingBoundaryOverrides)
-            {
-                AdditionalReferenceAssemblies = this.AdditionalReferenceAssemblies.Union(additionalReferenceAssemblies)
-            };
         }
 
         public string GetEffectiveSharingBoundary(ComposablePartDefinition partDefinition)
@@ -408,11 +396,44 @@
             Requires.NotNull(parts, "parts");
 
             XElement nodes, links;
-            var dgml = Dgml.Create(out nodes, out links, direction: "RightToLeft");
+            var dgml = Dgml.Create(out nodes, out links, direction: "RightToLeft")
+                .WithStyle(
+                    "ExportFactory",
+                    new Dictionary<string, string>
+                    {
+                        { "StrokeDashArray", "2,2" },
+                    },
+                    "Link")
+                .WithStyle(
+                    "VsMEFBuiltIn",
+                    new Dictionary<string, string>
+                    {
+                        { "Visibility", "Hidden" },
+                    });
+
+            foreach (string sharingBoundary in parts.Select(p => p.Definition.SharingBoundary).Distinct())
+            {
+                if (!string.IsNullOrEmpty(sharingBoundary))
+                {
+                    nodes.Add(Dgml.Node(sharingBoundary, sharingBoundary, "Expanded"));
+                }
+            }
 
             foreach (var part in parts)
             {
-                nodes.Add(Dgml.Node(part.Definition.Id, ReflectionHelpers.GetTypeName(part.Definition.Type, false, true, null, null)));
+                var node = Dgml.Node(part.Definition.Id, ReflectionHelpers.GetTypeName(part.Definition.Type, false, true, null, null));
+                if (!string.IsNullOrEmpty(part.Definition.SharingBoundary))
+                {
+                    node.ContainedBy(part.Definition.SharingBoundary, dgml);
+                }
+
+                string[] partDgmlCategories;
+                if (part.Definition.Metadata.TryGetValue(CompositionConstants.DgmlCategoryPartMetadataName, out partDgmlCategories))
+                {
+                    node = node.WithCategories(partDgmlCategories);
+                }
+
+                nodes.Add(node);
                 foreach (var import in part.SatisfyingExports.Keys)
                 {
                     foreach (ExportDefinitionBinding export in part.SatisfyingExports[import])
@@ -420,7 +441,13 @@
                         string linkLabel = !export.ExportedValueType.Equals(export.PartDefinition.Type)
                             ? export.ExportedValueType.ToString()
                             : null;
-                        links.Add(Dgml.Link(export.PartDefinition.Id, part.Definition.Id, linkLabel));
+                        var link = Dgml.Link(export.PartDefinition.Id, part.Definition.Id, linkLabel);
+                        if (import.IsExportFactory)
+                        {
+                            link = link.WithCategories("ExportFactory");
+                        }
+
+                        links.Add(link);
                     }
                 }
             }
@@ -567,6 +594,26 @@
             public int GetHashCode(ExportDefinition obj)
             {
                 return obj.ContractName.GetHashCode();
+            }
+        }
+
+        private class ReferenceEquality<T> : IEqualityComparer<T>
+            where T : class
+        {
+            internal static readonly ReferenceEquality<T> Default = new ReferenceEquality<T>();
+
+            private ReferenceEquality()
+            {
+            }
+
+            public bool Equals(T x, T y)
+            {
+                return ReferenceEquals(x, y);
+            }
+
+            public int GetHashCode(T obj)
+            {
+                return obj.GetHashCode();
             }
         }
     }

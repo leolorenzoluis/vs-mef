@@ -80,6 +80,114 @@
             Assert.Equal("c", tree.Metadata.B);
         }
 
+        [MefFact(CompositionEngines.V3EmulatingV1 | CompositionEngines.V3EmulatingV2, typeof(Tree), typeof(Apple))]
+        public void GetExportsImportDefinitionForTypeExport(IContainer container)
+        {
+            var v3Container = (TestUtilities.V3ContainerWrapper)container;
+
+            var exportProvider = v3Container.ExportProvider.AsExportProvider();
+            var importDefinition = new MefV1.Primitives.ContractBasedImportDefinition(
+                MefV1.AttributedModelServices.GetTypeIdentity(typeof(Tree)),
+                MefV1.AttributedModelServices.GetTypeIdentity(typeof(Tree)),
+                new KeyValuePair<string, Type>[]
+                {
+                    new KeyValuePair<string, Type>("A", typeof(string)),
+                },
+                MefV1.Primitives.ImportCardinality.ZeroOrMore,
+                false,
+                true,
+                MefV1.CreationPolicy.Any);
+
+            var results = exportProvider.GetExports(importDefinition).ToArray();
+            Assert.Equal(1, results.Length);
+            Assert.Equal("b", results[0].Metadata["A"]);
+            Assert.IsType<Tree>(results[0].Value);
+        }
+
+        public delegate object SomeDelegate(string arg1, object arg2);
+
+        [MefFact(CompositionEngines.V1Compat, typeof(PartExportingPropertyThatReturnsDelegate))]
+        public void GetExportsImportDefinitionForDelegateReturningProperty(IContainer container)
+        {
+            var exportProvider = GetMefV1Container(container);
+
+            SomeDelegate del = exportProvider.GetExportedValue<SomeDelegate>();
+            Assert.Null(del(null, null));
+
+            var importDefinition = new MefV1.Primitives.ContractBasedImportDefinition(
+                MefV1.AttributedModelServices.GetTypeIdentity(typeof(SomeDelegate)),
+                MefV1.AttributedModelServices.GetTypeIdentity(typeof(SomeDelegate)),
+                new KeyValuePair<string, Type>[0],
+                MefV1.Primitives.ImportCardinality.ZeroOrMore,
+                false,
+                true,
+                MefV1.CreationPolicy.Any);
+
+            var results = exportProvider.GetExports(importDefinition).ToArray();
+            Assert.Equal(1, results.Length);
+            Assert.IsAssignableFrom(typeof(SomeDelegate), results[0].Value);
+        }
+
+        [MefFact(CompositionEngines.V1Compat, typeof(DelegateExportingPart))]
+        public void GetExportsImportDefinitionForDelegateExport(IContainer container)
+        {
+            var exportProvider = GetMefV1Container(container);
+
+            var importDefinition = new MefV1.Primitives.ContractBasedImportDefinition(
+                MefV1.AttributedModelServices.GetTypeIdentity(typeof(SomeDelegate)),
+                MefV1.AttributedModelServices.GetTypeIdentity(typeof(SomeDelegate)),
+                new KeyValuePair<string, Type>[]
+                {
+                    new KeyValuePair<string, Type>("A", typeof(string)),
+                },
+                MefV1.Primitives.ImportCardinality.ZeroOrMore,
+                false,
+                true,
+                MefV1.CreationPolicy.Any);
+
+            var results = exportProvider.GetExports(importDefinition).ToArray();
+            Assert.Equal(2, results.Length);
+            Assert.Equal(1, results.Count(r => r.Metadata["A"].Equals("instance")));
+            Assert.Equal(1, results.Count(r => r.Metadata["A"].Equals("static")));
+
+            foreach (var export in results)
+            {
+                Assert.IsAssignableFrom(typeof(MefV1.Primitives.ExportedDelegate), export.Value);
+                var exportedDelegate = (MefV1.Primitives.ExportedDelegate)export.Value;
+                SomeDelegate asSomeDelegate = (SomeDelegate)exportedDelegate.CreateDelegate(typeof(SomeDelegate));
+                Assert.Null(asSomeDelegate(null, null));
+
+                Delegate asDelegate = exportedDelegate.CreateDelegate(typeof(Delegate));
+                Assert.Null(asDelegate.DynamicInvoke(new object[2]));
+            }
+        }
+
+        [MefFact(CompositionEngines.V1Compat, typeof(MismatchSignatureDelegateExportingPart))]
+        public void GetExportsImportDefinitionForDelegateExportWithMismatchingSignature(IContainer container)
+        {
+            var exportProvider = GetMefV1Container(container);
+
+            var importDefinition = new MefV1.Primitives.ContractBasedImportDefinition(
+                MefV1.AttributedModelServices.GetTypeIdentity(typeof(SomeDelegate)),
+                MefV1.AttributedModelServices.GetTypeIdentity(typeof(SomeDelegate)),
+                new KeyValuePair<string, Type>[0],
+                MefV1.Primitives.ImportCardinality.ZeroOrMore,
+                false,
+                true,
+                MefV1.CreationPolicy.Any);
+
+            var results = exportProvider.GetExports(importDefinition).ToArray();
+            Assert.Equal(1, results.Length);
+
+            foreach (var export in results)
+            {
+                Assert.IsAssignableFrom(typeof(MefV1.Primitives.ExportedDelegate), export.Value);
+                var exportedDelegate = (MefV1.Primitives.ExportedDelegate)export.Value;
+                Delegate asDelegate = exportedDelegate.CreateDelegate(typeof(Delegate));
+                Assert.Null(asDelegate.DynamicInvoke(new object[1]));
+            }
+        }
+
         #region SatisfyImportsOnce
 
         [MefFact(CompositionEngines.V3EmulatingV1 | CompositionEngines.V3EmulatingV2, typeof(Apple))]
@@ -323,6 +431,32 @@
             }
 
             return v1Container;
+        }
+
+        internal class MismatchSignatureDelegateExportingPart
+        {
+            [MefV1.Export(typeof(SomeDelegate))]
+            public void InstanceMethod(string arg1) { }
+        }
+
+        internal class DelegateExportingPart
+        {
+            [MefV1.Export(typeof(SomeDelegate))]
+            [MefV1.ExportMetadata("A", "instance")]
+            public object InstanceMethod(string arg1, object arg2) { return null; }
+
+            [MefV1.Export(typeof(SomeDelegate))]
+            [MefV1.ExportMetadata("A", "static")]
+            public static object StaticMethod(string arg1, object arg2) { return null; }
+        }
+
+        internal class PartExportingPropertyThatReturnsDelegate
+        {
+            [MefV1.Export]
+            public SomeDelegate Property
+            {
+                get { return new SomeDelegate(DelegateExportingPart.StaticMethod); }
+            }
         }
     }
 }
