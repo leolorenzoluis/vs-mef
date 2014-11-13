@@ -354,7 +354,10 @@
                 bool containsGenericParameters = member.DeclaringType.GetTypeInfo().ContainsGenericParameters;
                 if (containsGenericParameters)
                 {
-                    member = ReflectionHelpers.CloseGenericType(member.DeclaringType, part.GetType()).GetTypeInfo().DeclaredMembers.First(m => m.Name == member.Name);
+                    using (var typeArguments = ReflectionHelpers.ExtractGenericTypeArguments(member.DeclaringType, part.GetType()))
+                    {
+                        member = member.DeclaringType.Module.ResolveMember(member.MetadataToken, typeArguments.Value, null);
+                    }
                 }
 
                 var property = member as PropertyInfo;
