@@ -115,6 +115,7 @@
     <Compile Include="CompiledComposition.cs" />
     <Compile Include="ExportMetadataViewInterfaceEmitProxy.cs" />
     <Compile Include="MetadataViewGenerator.cs" />
+    <Compile Include="NetFxAdapters+MefV1Catalog.cs" />
     <Compile Include="SerializationContextBase.cs" />
     <Compile Include="SyntaxCodeGeneration.cs" />
     <Compile Include="NetFxAdapters.cs" />

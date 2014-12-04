@@ -165,6 +165,7 @@
     <Compile Include="InvalidGraphTests.cs" />
     <Compile Include="LazyServicesTests.cs" />
     <Compile Include="Mef3TestCommand.cs" />
+    <Compile Include="MefV1CatalogShimTests.cs" />
     <Compile Include="MefV1ExportProviderAdapterTests.cs" />
     <Compile Include="MefV3DiscoveryTestCommand.cs" />
     <Compile Include="MetadataViewImplementationTests.cs" />

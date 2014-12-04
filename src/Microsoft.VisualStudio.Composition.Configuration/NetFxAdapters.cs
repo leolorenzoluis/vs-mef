@@ -9,7 +9,7 @@
     using System.Threading.Tasks;
     using MefV1 = System.ComponentModel.Composition;
 
-    public static class NetFxAdapters
+    public static partial class NetFxAdapters
     {
         private static readonly ComposablePartDefinition compositionServicePart;
         private static readonly ComposablePartDefinition metadataViewImplProxyPart;
@@ -34,6 +34,20 @@
             Requires.NotNull(exportProvider, "exportProvider");
 
             return new MefV1ExportProvider(exportProvider);
+        }
+
+        /// <summary>
+        /// Creates an instance of a <see cref="MefV1.Primitives.ComposablePartCatalog"/>
+        /// for purposes of compatibility with the version of MEF found in the .NET Framework.
+        /// </summary>
+        /// <param name="catalog">The <see cref="ComposableCatalog"/> created with this library that should be converted to a .NET MEF catalog.</param>
+        /// <returns>A .NET MEF catalog.</returns>
+        /// <exception cref="NotSupportedException">Thrown when the provided catalog includes parts not supported by .NET MEF.</exception>
+        public static MefV1.Primitives.ComposablePartCatalog AsComposablePartCatalog(this ComposableCatalog catalog)
+        {
+            Requires.NotNull(catalog, "catalog");
+
+            return new MefV1Catalog(catalog);
         }
 
         /// <summary>
