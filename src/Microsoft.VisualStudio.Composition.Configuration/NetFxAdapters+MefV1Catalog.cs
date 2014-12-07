@@ -37,11 +37,17 @@
             {
                 private readonly MefV1ComposablePartDefinition definition;
 
-                internal MefV1ComposablePart(MefV1ComposablePartDefinition definition)
+                /// <summary>
+                /// The actual instantiated part that we retrieve exports from and set imports to.
+                /// </summary>
+                private readonly object value;
+
+                internal MefV1ComposablePart(MefV1ComposablePartDefinition definition, object value)
                 {
                     Requires.NotNull(definition, "definition");
 
                     this.definition = definition;
+                    this.value = value;
                 }
 
                 public override IEnumerable<MefV1.Primitives.ExportDefinition> ExportDefinitions
@@ -56,7 +62,7 @@
 
                 public override object GetExportedValue(MefV1.Primitives.ExportDefinition definition)
                 {
-                    throw new NotImplementedException();
+                    return this.value;
                 }
 
                 public override void SetImport(MefV1.Primitives.ImportDefinition definition, IEnumerable<MefV1.Primitives.Export> exports)
@@ -88,7 +94,13 @@
 
                 public override ComposablePart CreatePart()
                 {
-                    return new MefV1ComposablePart(this);
+                    object value = null;
+                    if (this.partDefinition.IsInstantiable)
+                    {
+                        value = this.partDefinition.ImportingConstructorInfo.Invoke(new object[0]);
+                    }
+
+                    return new MefV1ComposablePart(this, value);
                 }
 
                 internal static MefV1.Primitives.ComposablePartDefinition Wrap(ComposablePartDefinition part)
