@@ -14,6 +14,10 @@
         private static readonly ComposablePartDefinition compositionServicePart;
         private static readonly ComposablePartDefinition metadataViewImplProxyPart;
         private static readonly ComposablePartDefinition assemblyNameCodeBasePathPath;
+        private static readonly Type IPartCreatorImportDefinition = typeof(MefV1.Primitives.ImportDefinition).Assembly.GetType("System.ComponentModel.Composition.Primitives.IPartCreatorImportDefinition");
+        private static readonly PropertyInfo ProductImportDefinition = IPartCreatorImportDefinition.GetProperty("ProductImportDefinition", BindingFlags.Instance | BindingFlags.Public);
+        private static readonly Type ExportFactoryV1Type = typeof(MefV1.ExportFactory<object, IDictionary<string, object>>);
+        private static readonly string ExportFactoryV1TypeIdentity = PartDiscovery.GetContractName(ExportFactoryV1Type);
 
         static NetFxAdapters()
         {
@@ -78,13 +82,58 @@
                 .WithMetadataViewEmitProxySupport();
         }
 
+        private static CreationPolicy WrapCreationPolicy(MefV1.CreationPolicy creationPolicy)
+        {
+            switch (creationPolicy)
+            {
+                case MefV1.CreationPolicy.Any:
+                    return CreationPolicy.Any;
+                case MefV1.CreationPolicy.Shared:
+                    return CreationPolicy.Shared;
+                case MefV1.CreationPolicy.NonShared:
+                    return CreationPolicy.NonShared;
+                default:
+                    throw new ArgumentException();
+            }
+        }
+
+        private static ImportDefinition WrapImportDefinition(MefV1.Primitives.ImportDefinition definition)
+        {
+            Requires.NotNull(definition, "definition");
+
+            var contractImportDefinition = definition as MefV1.Primitives.ContractBasedImportDefinition;
+
+            var constraints = ImmutableHashSet<IImportSatisfiabilityConstraint>.Empty
+                .Add(new ImportConstraint(definition));
+            if (contractImportDefinition != null)
+            {
+                constraints = constraints.Union(PartCreationPolicyConstraint.GetRequiredCreationPolicyConstraints(WrapCreationPolicy(contractImportDefinition.RequiredCreationPolicy)));
+            }
+
+            // Do NOT propagate the cardinality otherwise the export provider will throw
+            // if the cardinality is not met. But it's not our job to throw, since the caller
+            // is going to aggregate our response with other export providers and finally
+            // be responsible for throwing if the ultimate receiver of the result doesn't
+            // get what they expect.
+            // We use ZeroOrMore to indicate we'll accept any response.
+            var cardinality = ImportCardinality.ZeroOrMore;
+
+            var metadata = (IReadOnlyDictionary<string, object>)definition.Metadata;
+
+            if (IPartCreatorImportDefinition.IsInstanceOfType(definition))
+            {
+                var productImportDefinitionV1 = (MefV1.Primitives.ImportDefinition)ProductImportDefinition.GetValue(definition);
+                var productImportDefinitionV3 = WrapImportDefinition(productImportDefinitionV1);
+                metadata = metadata.ToImmutableDictionary()
+                    .Add(CompositionConstants.ExportFactoryProductImportDefinition, productImportDefinitionV3)
+                    .Add(CompositionConstants.ExportFactoryTypeMetadataName, ExportFactoryV1Type);
+            }
+
+            return new ImportDefinition(definition.ContractName, cardinality, metadata, constraints);
+        }
+
         private class MefV1ExportProvider : MefV1.Hosting.ExportProvider
         {
-            private static readonly Type ExportFactoryV1Type = typeof(MefV1.ExportFactory<object, IDictionary<string, object>>);
-            private static readonly Type IPartCreatorImportDefinition = typeof(MefV1.Primitives.ImportDefinition).Assembly.GetType("System.ComponentModel.Composition.Primitives.IPartCreatorImportDefinition");
-            private static readonly PropertyInfo ProductImportDefinition = IPartCreatorImportDefinition.GetProperty("ProductImportDefinition", BindingFlags.Instance | BindingFlags.Public);
-            private static readonly string ExportFactoryV1TypeIdentity = PartDiscovery.GetContractName(ExportFactoryV1Type);
-
             private readonly ExportProvider exportProvider;
 
             internal MefV1ExportProvider(ExportProvider exportProvider)
@@ -100,41 +149,6 @@
                 var result = ImmutableList.CreateBuilder<MefV1.Primitives.Export>();
                 var exports = this.exportProvider.GetExports(v3ImportDefinition);
                 return exports.Select(UnwrapExport).ToArray();
-            }
-
-            private static ImportDefinition WrapImportDefinition(MefV1.Primitives.ImportDefinition definition)
-            {
-                Requires.NotNull(definition, "definition");
-
-                var contractImportDefinition = definition as MefV1.Primitives.ContractBasedImportDefinition;
-
-                var constraints = ImmutableHashSet<IImportSatisfiabilityConstraint>.Empty
-                    .Add(new ImportConstraint(definition));
-                if (contractImportDefinition != null)
-                {
-                    constraints = constraints.Union(PartCreationPolicyConstraint.GetRequiredCreationPolicyConstraints(WrapCreationPolicy(contractImportDefinition.RequiredCreationPolicy)));
-                }
-
-                // Do NOT propagate the cardinality otherwise the export provider will throw
-                // if the cardinality is not met. But it's not our job to throw, since the caller
-                // is going to aggregate our response with other export providers and finally
-                // be responsible for throwing if the ultimate receiver of the result doesn't
-                // get what they expect.
-                // We use ZeroOrMore to indicate we'll accept any response.
-                var cardinality = ImportCardinality.ZeroOrMore;
-
-                var metadata = (IReadOnlyDictionary<string, object>)definition.Metadata;
-
-                if (IPartCreatorImportDefinition.IsInstanceOfType(definition))
-                {
-                    var productImportDefinitionV1 = (MefV1.Primitives.ImportDefinition)ProductImportDefinition.GetValue(definition);
-                    var productImportDefinitionV3 = WrapImportDefinition(productImportDefinitionV1);
-                    metadata = metadata.ToImmutableDictionary()
-                        .Add(CompositionConstants.ExportFactoryProductImportDefinition, productImportDefinitionV3)
-                        .Add(CompositionConstants.ExportFactoryTypeMetadataName, ExportFactoryV1Type);
-                }
-
-                return new ImportDefinition(definition.ContractName, cardinality, metadata, constraints);
             }
 
             private static IDictionary<string, object> GetMefV1ExportDefinitionMetadataFromV3(IReadOnlyDictionary<string, object> exportDefinitionMetadata)
@@ -175,21 +189,6 @@
                         return MefV1.CreationPolicy.Shared;
                     case CreationPolicy.NonShared:
                         return MefV1.CreationPolicy.NonShared;
-                    default:
-                        throw new ArgumentException();
-                }
-            }
-
-            private static CreationPolicy WrapCreationPolicy(MefV1.CreationPolicy creationPolicy)
-            {
-                switch (creationPolicy)
-                {
-                    case MefV1.CreationPolicy.Any:
-                        return CreationPolicy.Any;
-                    case MefV1.CreationPolicy.Shared:
-                        return CreationPolicy.Shared;
-                    case MefV1.CreationPolicy.NonShared:
-                        return CreationPolicy.NonShared;
                     default:
                         throw new ArgumentException();
                 }
