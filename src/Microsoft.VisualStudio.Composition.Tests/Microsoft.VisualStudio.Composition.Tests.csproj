@@ -167,6 +167,7 @@
     <Compile Include="Mef3TestCommand.cs" />
     <Compile Include="MefV1CatalogShimTests.cs" />
     <Compile Include="MefV1ExportProviderAdapterTests.cs" />
+    <Compile Include="MefV1WithV3CatalogTestCommand.cs" />
     <Compile Include="MefV3DiscoveryTestCommand.cs" />
     <Compile Include="MetadataViewImplementationTests.cs" />
     <Compile Include="MixedGenericExportsTests.cs" />

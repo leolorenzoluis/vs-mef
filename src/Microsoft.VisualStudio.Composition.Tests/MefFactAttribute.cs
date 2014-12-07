@@ -100,6 +100,11 @@
                         }
 
                         yield return new Mef3TestCommand(method, configuration, this.compositionVersions, runtime: true);
+
+                        if (this.compositionVersions.HasFlag(CompositionEngines.V1WithV3Catalog))
+                        {
+                            yield return new MefV1WithV3CatalogTestCommand(method, configuration.Catalog, this.compositionVersions);
+                        }
                     }
                 }
             }

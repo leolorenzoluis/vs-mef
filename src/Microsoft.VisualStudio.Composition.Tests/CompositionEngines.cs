@@ -34,6 +34,11 @@
         V3EmulatingV1AndV2AtOnce = 0x0400,
 
         /// <summary>
+        /// System.ComponentModel.Composition, with the catalog created by Microsoft.VisualStudio.Composition reading both V1 and V2 attributes.
+        /// </summary>
+        V1WithV3Catalog = 0x0800,
+
+        /// <summary>
         /// Indicates that non-publics will be reflected over.
         /// </summary>
         V3NonPublicSupport = 0x1000,

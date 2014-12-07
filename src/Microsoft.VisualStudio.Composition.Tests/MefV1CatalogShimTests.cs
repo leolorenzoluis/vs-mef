@@ -11,16 +11,10 @@
 
     public class MefV1CatalogShimTests
     {
-        [Fact]
-        public async Task SimpleTypeAsV1Catalog()
+        [MefFact(CompositionEngines.V1WithV3Catalog | CompositionEngines.V3EmulatingV1AndV2AtOnce, typeof(Apple))]
+        public void SimpleTypeAsV1Catalog(IContainer container)
         {
-            var v2Discovery = new AttributedPartDiscovery();
-            var discoveryResults = await v2Discovery.CreatePartsAsync(typeof(Apple));
-            var catalog = ComposableCatalog.Create(discoveryResults);
-            var v1Catalog = catalog.AsComposablePartCatalog();
-
-            var v1Container = new MefV1.Hosting.CompositionContainer(v1Catalog);
-            var apple = v1Container.GetExportedValue<Apple>();
+            var apple = container.GetExportedValue<Apple>();
             Assert.NotNull(apple);
         }
 

@@ -180,7 +180,7 @@
             return CreateContainerV1(catalog);
         }
 
-        private static IContainer CreateContainerV1(MefV1.Primitives.ComposablePartCatalog catalog)
+        internal static IContainer CreateContainerV1(MefV1.Primitives.ComposablePartCatalog catalog)
         {
             Requires.NotNull(catalog, "catalog");
             var container = new DebuggableCompositionContainer(catalog, MefV1.Hosting.CompositionOptions.ExportCompositionService | MefV1.Hosting.CompositionOptions.IsThreadSafe);
