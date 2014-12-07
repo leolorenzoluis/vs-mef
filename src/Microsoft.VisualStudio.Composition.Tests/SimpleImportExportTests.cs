@@ -17,7 +17,7 @@
             Apple.CreatedCount = 0;
         }
 
-        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat)]
+        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat | CompositionEngines.V1WithV3Catalog)]
         public void AcquireSingleExport(IContainer container)
         {
             Apple apple = container.GetExportedValue<Apple>();
