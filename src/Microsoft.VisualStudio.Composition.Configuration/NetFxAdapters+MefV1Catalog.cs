@@ -32,51 +32,100 @@
 
                 return exports;
             }
-        }
 
-        private class MefV1ComposablePartDefinition : MefV1.Primitives.ComposablePartDefinition
-        {
-            internal MefV1ComposablePartDefinition()
-                : base()
+            private class MefV1ComposablePart : MefV1.Primitives.ComposablePart
             {
-            }
+                private readonly MefV1ComposablePartDefinition definition;
 
-            public override IEnumerable<MefV1.Primitives.ExportDefinition> ExportDefinitions
-            {
-                get
+                internal MefV1ComposablePart(MefV1ComposablePartDefinition definition)
+                {
+                    Requires.NotNull(definition, "definition");
+
+                    this.definition = definition;
+                }
+
+                public override IEnumerable<MefV1.Primitives.ExportDefinition> ExportDefinitions
+                {
+                    get { return this.definition.ExportDefinitions; }
+                }
+
+                public override IEnumerable<MefV1.Primitives.ImportDefinition> ImportDefinitions
+                {
+                    get { return this.definition.ImportDefinitions; }
+                }
+
+                public override object GetExportedValue(MefV1.Primitives.ExportDefinition definition)
+                {
+                    throw new NotImplementedException();
+                }
+
+                public override void SetImport(MefV1.Primitives.ImportDefinition definition, IEnumerable<MefV1.Primitives.Export> exports)
                 {
                     throw new NotImplementedException();
                 }
             }
 
-            public override IEnumerable<MefV1.Primitives.ImportDefinition> ImportDefinitions
+            private class MefV1ComposablePartDefinition : MefV1.Primitives.ComposablePartDefinition
             {
-                get
+                private readonly ComposablePartDefinition partDefinition;
+
+                internal MefV1ComposablePartDefinition(ComposablePartDefinition partDefinition)
+                    : base()
                 {
-                    throw new NotImplementedException();
+                    Requires.NotNull(partDefinition, "partDefinition");
+                    this.partDefinition = partDefinition;
+                }
+
+                public override IEnumerable<MefV1.Primitives.ExportDefinition> ExportDefinitions
+                {
+                    get { throw new NotImplementedException(); }
+                }
+
+                public override IEnumerable<MefV1.Primitives.ImportDefinition> ImportDefinitions
+                {
+                    get { return this.partDefinition.Imports.Select(i => new MefV1ImportDefinition(i.ImportDefinition)); }
+                }
+
+                public override ComposablePart CreatePart()
+                {
+                    return new MefV1ComposablePart(this);
+                }
+
+                internal static MefV1.Primitives.ComposablePartDefinition Wrap(ComposablePartDefinition part)
+                {
+                    return new MefV1ComposablePartDefinition(part);
                 }
             }
 
-            public override ComposablePart CreatePart()
+            private class MefV1ImportDefinition : MefV1.Primitives.ImportDefinition
             {
-                throw new NotImplementedException();
+                private readonly ImportDefinition importDefinition;
+
+                internal MefV1ImportDefinition(ImportDefinition importDefinition)
+                {
+                    this.importDefinition = importDefinition;
+                }
             }
 
-            internal static MefV1.Primitives.ComposablePartDefinition Wrap(ComposablePartDefinition part)
+            private class MefV1ExportDefinition : MefV1.Primitives.ExportDefinition
             {
-                return new MefV1ComposablePartDefinition();
-            }
-        }
+                private readonly ExportDefinition exportDefinition;
 
-        private class MefV1ExportDefinition : MefV1.Primitives.ExportDefinition
-        {
-            internal MefV1ExportDefinition(ExportDefinition exportDefinition)
-            {
-            }
+                internal MefV1ExportDefinition(ExportDefinition exportDefinition)
+                {
+                    Requires.NotNull(exportDefinition, "exportDefinition");
+                    this.exportDefinition = exportDefinition;
+                }
 
-            internal static MefV1.Primitives.ExportDefinition Wrap(ExportDefinition exportDefinition)
-            {
-                return new MefV1ExportDefinition(exportDefinition);
+                public override string ContractName
+                {
+                    get { return this.exportDefinition.ContractName; }
+                }
+
+                internal static MefV1.Primitives.ExportDefinition Wrap(ExportDefinition exportDefinition)
+                {
+                    return new MefV1ExportDefinition(exportDefinition);
+                }
             }
         }
     }
