@@ -67,6 +67,8 @@
 
                 public override void SetImport(MefV1.Primitives.ImportDefinition definition, IEnumerable<MefV1.Primitives.Export> exports)
                 {
+                    var importDefinition = ((MefV1ImportDefinition)definition).ImportDefinitionBinding;
+
                     throw new NotImplementedException();
                 }
             }
@@ -89,7 +91,7 @@
 
                 public override IEnumerable<MefV1.Primitives.ImportDefinition> ImportDefinitions
                 {
-                    get { return this.partDefinition.Imports.Select(i => new MefV1ImportDefinition(i.ImportDefinition)); }
+                    get { return this.partDefinition.Imports.Select(i => new MefV1ImportDefinition(i)); }
                 }
 
                 public override ComposablePart CreatePart()
@@ -111,11 +113,32 @@
 
             private class MefV1ImportDefinition : MefV1.Primitives.ImportDefinition
             {
-                private readonly ImportDefinition importDefinition;
+                private readonly ImportDefinitionBinding importDefinitionBinding;
 
-                internal MefV1ImportDefinition(ImportDefinition importDefinition)
+                internal MefV1ImportDefinition(ImportDefinitionBinding importDefinition)
                 {
-                    this.importDefinition = importDefinition;
+                    this.importDefinitionBinding = importDefinition;
+                }
+
+                public override string ContractName
+                {
+                    get { return this.importDefinitionBinding.ImportDefinition.ContractName; }
+                }
+
+                internal ImportDefinitionBinding ImportDefinitionBinding
+                {
+                    get { return this.importDefinitionBinding; }
+                }
+
+                internal ImportDefinition ImportDefinition
+                {
+                    get { return this.importDefinitionBinding.ImportDefinition; }
+                }
+
+                public override bool IsConstraintSatisfiedBy(MefV1.Primitives.ExportDefinition exportDefinition)
+                {
+                    var unwrappedExportDefinition = MefV1ExportDefinition.Unwrap(exportDefinition);
+                    return this.ImportDefinition.ExportConstraints.All(c => c.IsSatisfiedBy(unwrappedExportDefinition));
                 }
             }
 
@@ -137,6 +160,11 @@
                 internal static MefV1.Primitives.ExportDefinition Wrap(ExportDefinition exportDefinition)
                 {
                     return new MefV1ExportDefinition(exportDefinition);
+                }
+
+                internal static ExportDefinition Unwrap(MefV1.Primitives.ExportDefinition exportDefinition)
+                {
+                    return new ExportDefinition(exportDefinition.ContractName, ImmutableDictionary.CreateRange(exportDefinition.Metadata));
                 }
             }
         }

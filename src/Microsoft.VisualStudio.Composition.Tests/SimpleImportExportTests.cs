@@ -60,7 +60,7 @@
             Assert.Equal(1, Apple.CreatedCount);
         }
 
-        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat)]
+        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat | CompositionEngines.V1WithV3Catalog)]
         public void AcquireExportWithImport(IContainer container)
         {
             Tree tree = container.GetExportedValue<Tree>();
