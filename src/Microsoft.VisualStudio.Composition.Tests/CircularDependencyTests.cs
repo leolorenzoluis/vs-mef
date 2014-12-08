@@ -13,7 +13,7 @@
     {
         #region Tight loop of all shared exports
 
-        [MefFact(CompositionEngines.V2Compat, typeof(SharedExport1), typeof(SharedExport2))]
+        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat, typeof(SharedExport1), typeof(SharedExport2))]
         public void CircularDependenciesSharedExports(IContainer container)
         {
             var export1 = container.GetExportedValue<SharedExport1>();
@@ -23,16 +23,20 @@
         }
 
         [Export, Shared]
+        [MefV1.Export]
         public class SharedExport1
         {
             [Import]
+            [MefV1.Import]
             public SharedExport2 Export2 { get; set; }
         }
 
         [Export, Shared]
+        [MefV1.Export]
         public class SharedExport2
         {
             [Import]
+            [MefV1.Import]
             public SharedExport1 Export1 { get; set; }
         }
 
