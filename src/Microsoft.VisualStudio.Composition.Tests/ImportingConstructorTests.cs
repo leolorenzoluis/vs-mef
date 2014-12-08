@@ -12,7 +12,7 @@
 
     public class ImportingConstructorTests
     {
-        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat, typeof(SimpleImportingConstructorPart), typeof(RandomExport))]
+        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat | CompositionEngines.V1WithV3Catalog, typeof(SimpleImportingConstructorPart), typeof(RandomExport))]
         public void SimpleImportingConstructor(IContainer container)
         {
             var part = container.GetExportedValue<SimpleImportingConstructorPart>();

@@ -37,6 +37,8 @@
             {
                 private readonly MefV1ComposablePartDefinition definition;
 
+                private IEnumerable<MefV1.Primitives.Export>[] importingConstructorExports;
+
                 /// <summary>
                 /// The actual instantiated part that we retrieve exports from and set imports to.
                 /// </summary>
@@ -47,6 +49,7 @@
                     Requires.NotNull(definition, "definition");
 
                     this.definition = definition;
+                    this.importingConstructorExports = new IEnumerable<MefV1.Primitives.Export>[definition.PartDefinition.ImportingConstructorImports.Count];
                 }
 
                 public override IEnumerable<MefV1.Primitives.ExportDefinition> ExportDefinitions
@@ -67,20 +70,40 @@
 
                 public override void SetImport(MefV1.Primitives.ImportDefinition definition, IEnumerable<MefV1.Primitives.Export> exports)
                 {
-                    object value = this.GetInstanceActivatingIfNeeded();
-
                     var importDefinition = ((MefV1ImportDefinition)definition).ImportDefinitionBinding;
-                    ReflectionHelpers.SetMember(value, importDefinition.ImportingMember, exports.First().Value);
+
+                    if (importDefinition.ImportingParameter != null)
+                    {
+                        this.importingConstructorExports[importDefinition.ImportingParameter.Position] = exports;
+                    }
+                    else
+                    {
+                        object value = this.GetInstanceActivatingIfNeeded();
+                        ReflectionHelpers.SetMember(value, importDefinition.ImportingMember, exports.First().Value);
+                    }
                 }
 
                 private object GetInstanceActivatingIfNeeded()
                 {
                     if (this.value == null && this.definition.PartDefinition.IsInstantiable)
                     {
-                        this.value = this.definition.PartDefinition.ImportingConstructorInfo.Invoke(new object[0]);
+                        object[] args = new object[this.importingConstructorExports.Length];
+                        for (int i = 0; i < this.importingConstructorExports.Length; i++)
+                        {
+                            args[i] = this.GetValueForImportSite(
+                                this.definition.PartDefinition.ImportingConstructorImports[i],
+                                this.importingConstructorExports[i]);
+                        }
+
+                        this.value = this.definition.PartDefinition.ImportingConstructorInfo.Invoke(args);
                     }
 
                     return this.value;
+                }
+
+                private object GetValueForImportSite(ImportDefinitionBinding importBinding, IEnumerable<MefV1.Primitives.Export> exports)
+                {
+                    return exports.First().Value;
                 }
             }
 
