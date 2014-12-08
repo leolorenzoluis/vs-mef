@@ -20,7 +20,7 @@
         {
             this.catalog = catalog;
             this.compositionVersions = compositionVersions;
-            this.DisplayName = "V3 catalog + V1 container.";
+            this.DisplayName = "V3 catalog + V1 container";
         }
 
         public override MethodResult Execute(object testClass)

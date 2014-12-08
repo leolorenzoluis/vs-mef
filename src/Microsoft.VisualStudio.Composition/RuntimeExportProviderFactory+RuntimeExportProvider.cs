@@ -19,7 +19,7 @@
             /// <summary>
             /// BindingFlags that find members declared exactly on the receiving type, whether they be public or not, instance or static.
             /// </summary>
-            private const BindingFlags DeclaredOnlyLookup = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+            private const BindingFlags DeclaredOnlyLookup = ReflectionHelpers.DeclaredOnlyLookup;
 
             private readonly RuntimeComposition composition;
 
@@ -352,31 +352,7 @@
 
             private static void SetImportingMember(object part, MemberInfo member, object value)
             {
-                Requires.NotNull(part, "part");
-                Requires.NotNull(member, "member");
-
-                bool containsGenericParameters = member.DeclaringType.GetTypeInfo().ContainsGenericParameters;
-                if (containsGenericParameters)
-                {
-                    member = ReflectionHelpers.CloseGenericType(member.DeclaringType, part.GetType())
-                        .GetMember(member.Name, MemberTypes.Property | MemberTypes.Field, DeclaredOnlyLookup)[0];
-                }
-
-                var property = member as PropertyInfo;
-                if (property != null)
-                {
-                    property.SetValue(part, value);
-                    return;
-                }
-
-                var field = member as FieldInfo;
-                if (field != null)
-                {
-                    field.SetValue(part, value);
-                    return;
-                }
-
-                throw new NotSupportedException();
+                ReflectionHelpers.SetMember(part, member, value);
             }
 
             private static object GetImportingMember(object part, MemberInfo member)

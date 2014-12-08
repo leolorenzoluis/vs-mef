@@ -40,14 +40,13 @@
                 /// <summary>
                 /// The actual instantiated part that we retrieve exports from and set imports to.
                 /// </summary>
-                private readonly object value;
+                private object value;
 
-                internal MefV1ComposablePart(MefV1ComposablePartDefinition definition, object value)
+                internal MefV1ComposablePart(MefV1ComposablePartDefinition definition)
                 {
                     Requires.NotNull(definition, "definition");
 
                     this.definition = definition;
-                    this.value = value;
                 }
 
                 public override IEnumerable<MefV1.Primitives.ExportDefinition> ExportDefinitions
@@ -62,14 +61,26 @@
 
                 public override object GetExportedValue(MefV1.Primitives.ExportDefinition definition)
                 {
-                    return this.value;
+                    object value = this.GetInstanceActivatingIfNeeded();
+                    return value;
                 }
 
                 public override void SetImport(MefV1.Primitives.ImportDefinition definition, IEnumerable<MefV1.Primitives.Export> exports)
                 {
-                    var importDefinition = ((MefV1ImportDefinition)definition).ImportDefinitionBinding;
+                    object value = this.GetInstanceActivatingIfNeeded();
 
-                    throw new NotImplementedException();
+                    var importDefinition = ((MefV1ImportDefinition)definition).ImportDefinitionBinding;
+                    ReflectionHelpers.SetMember(value, importDefinition.ImportingMember, exports.First().Value);
+                }
+
+                private object GetInstanceActivatingIfNeeded()
+                {
+                    if (this.value == null && this.definition.PartDefinition.IsInstantiable)
+                    {
+                        this.value = this.definition.PartDefinition.ImportingConstructorInfo.Invoke(new object[0]);
+                    }
+
+                    return this.value;
                 }
             }
 
@@ -94,15 +105,14 @@
                     get { return this.partDefinition.Imports.Select(i => new MefV1ImportDefinition(i)); }
                 }
 
+                internal ComposablePartDefinition PartDefinition
+                {
+                    get { return this.partDefinition; }
+                }
+
                 public override ComposablePart CreatePart()
                 {
-                    object value = null;
-                    if (this.partDefinition.IsInstantiable)
-                    {
-                        value = this.partDefinition.ImportingConstructorInfo.Invoke(new object[0]);
-                    }
-
-                    return new MefV1ComposablePart(this, value);
+                    return new MefV1ComposablePart(this);
                 }
 
                 internal static MefV1.Primitives.ComposablePartDefinition Wrap(ComposablePartDefinition part)

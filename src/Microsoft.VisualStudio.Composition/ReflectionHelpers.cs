@@ -13,6 +13,11 @@
 
     public static class ReflectionHelpers
     {
+        /// <summary>
+        /// BindingFlags that find members declared exactly on the receiving type, whether they be public or not, instance or static.
+        /// </summary>
+        internal const BindingFlags DeclaredOnlyLookup = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+
         private static readonly Assembly mscorlib = typeof(int).GetTypeInfo().Assembly;
 
         /// <summary>
@@ -513,6 +518,35 @@
             Requires.NotNull(metadata, "metadata");
 
             // TODO: code here
+        }
+
+        internal static void SetMember(object part, MemberInfo member, object value)
+        {
+            Requires.NotNull(part, "part");
+            Requires.NotNull(member, "member");
+
+            bool containsGenericParameters = member.DeclaringType.GetTypeInfo().ContainsGenericParameters;
+            if (containsGenericParameters)
+            {
+                member = ReflectionHelpers.CloseGenericType(member.DeclaringType, part.GetType())
+                    .GetMember(member.Name, MemberTypes.Property | MemberTypes.Field, DeclaredOnlyLookup)[0];
+            }
+
+            var property = member as PropertyInfo;
+            if (property != null)
+            {
+                property.SetValue(part, value);
+                return;
+            }
+
+            var field = member as FieldInfo;
+            if (field != null)
+            {
+                field.SetValue(part, value);
+                return;
+            }
+
+            throw new NotSupportedException();
         }
 
         private static string FilterTypeNameForGenericTypeDefinition(Type type, bool fullName)
