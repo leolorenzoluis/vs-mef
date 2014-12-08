@@ -15,6 +15,7 @@
     {
         private class MefV1Catalog : MefV1.Primitives.ComposablePartCatalog
         {
+            private readonly object syncObject = new object();
             private readonly ComposableCatalog catalog;
             private readonly Dictionary<ComposablePartDefinition, MefV1ComposablePartDefinition> partShimMap = new Dictionary<ComposablePartDefinition, MefV1ComposablePartDefinition>();
             private readonly Dictionary<ExportDefinition, MefV1ExportDefinition> exportShimMap = new Dictionary<ExportDefinition, MefV1ExportDefinition>();
@@ -38,24 +39,30 @@
 
             private MefV1.Primitives.ComposablePartDefinition GetShim(ComposablePartDefinition partDefinition)
             {
-                MefV1ComposablePartDefinition result;
-                if (!this.partShimMap.TryGetValue(partDefinition, out result))
+                lock (this.syncObject)
                 {
-                    result = this.partShimMap[partDefinition] = new MefV1ComposablePartDefinition(partDefinition);
-                }
+                    MefV1ComposablePartDefinition result;
+                    if (!this.partShimMap.TryGetValue(partDefinition, out result))
+                    {
+                        result = this.partShimMap[partDefinition] = new MefV1ComposablePartDefinition(partDefinition);
+                    }
 
-                return result;
+                    return result;
+                }
             }
 
             private MefV1.Primitives.ExportDefinition GetShim(ExportDefinition exportDefinition)
             {
-                MefV1ExportDefinition result;
-                if ((!this.exportShimMap.TryGetValue(exportDefinition, out result)))
+                lock (this.syncObject)
                 {
-                    result = this.exportShimMap[exportDefinition] = new MefV1ExportDefinition(exportDefinition);
-                }
+                    MefV1ExportDefinition result;
+                    if ((!this.exportShimMap.TryGetValue(exportDefinition, out result)))
+                    {
+                        result = this.exportShimMap[exportDefinition] = new MefV1ExportDefinition(exportDefinition);
+                    }
 
-                return result;
+                    return result;
+                }
             }
 
             private class MefV1ComposablePart : MefV1.Primitives.ComposablePart
