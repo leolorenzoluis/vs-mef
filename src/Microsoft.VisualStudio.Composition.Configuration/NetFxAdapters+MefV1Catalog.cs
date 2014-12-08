@@ -62,6 +62,9 @@
             {
                 private readonly MefV1ComposablePartDefinition definition;
 
+                /// <summary>
+                /// Collects the exports required to instantiate the MEF part.
+                /// </summary>
                 private IEnumerable<MefV1.Primitives.Export>[] importingConstructorExports;
 
                 /// <summary>
@@ -121,6 +124,9 @@
                         }
 
                         this.value = this.definition.PartDefinition.ImportingConstructorInfo.Invoke(args);
+
+                        // We don't need this any more, so free memory.
+                        this.importingConstructorExports = null;
                     }
 
                     return this.value;
