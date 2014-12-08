@@ -24,7 +24,7 @@
             Assert.NotNull(apple);
         }
 
-        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat)]
+        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat | CompositionEngines.V1WithV3Catalog)]
         [Trait("Container.GetExport", "Plural")]
         public void AcquireSingleExportViaGetExportedValues(IContainer container)
         {
@@ -32,7 +32,7 @@
             Assert.NotNull(apple);
         }
 
-        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat)]
+        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat | CompositionEngines.V1WithV3Catalog)]
         [Trait("Container.GetExport", "Plural")]
         public void AcquireSingleExportViaGetExports(IContainer container)
         {
@@ -41,7 +41,7 @@
             Assert.NotNull(apple.Value);
         }
 
-        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat)]
+        [MefFact(CompositionEngines.V1Compat | CompositionEngines.V2Compat | CompositionEngines.V1WithV3Catalog)]
         public void AcquireSingleLazyExport(IContainer container)
         {
             Lazy<Apple> appleLazy = container.GetExport<Apple>();
