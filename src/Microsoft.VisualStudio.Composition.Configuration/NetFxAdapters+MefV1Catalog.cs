@@ -5,6 +5,7 @@
     using System.Collections.Immutable;
     using System.ComponentModel.Composition.Primitives;
     using System.Linq;
+    using System.Linq.Expressions;
     using System.Reflection;
     using System.Text;
     using System.Threading.Tasks;
@@ -15,6 +16,8 @@
         private class MefV1Catalog : MefV1.Primitives.ComposablePartCatalog
         {
             private readonly ComposableCatalog catalog;
+            private readonly Dictionary<ComposablePartDefinition, MefV1ComposablePartDefinition> partShimMap = new Dictionary<ComposablePartDefinition, MefV1ComposablePartDefinition>();
+            private readonly Dictionary<ExportDefinition, MefV1ExportDefinition> exportShimMap = new Dictionary<ExportDefinition, MefV1ExportDefinition>();
 
             internal MefV1Catalog(ComposableCatalog catalog)
             {
@@ -27,10 +30,32 @@
                 var importDefinition = WrapImportDefinition(definition);
                 var exports = from exportDefinitionBinding in this.catalog.GetExports(importDefinition)
                               select Tuple.Create(
-                                  MefV1ComposablePartDefinition.Wrap(exportDefinitionBinding.PartDefinition),
-                                  MefV1ExportDefinition.Wrap(exportDefinitionBinding.ExportDefinition));
+                                  this.GetShim(exportDefinitionBinding.PartDefinition),
+                                  this.GetShim(exportDefinitionBinding.ExportDefinition));
 
                 return exports;
+            }
+
+            private MefV1.Primitives.ComposablePartDefinition GetShim(ComposablePartDefinition partDefinition)
+            {
+                MefV1ComposablePartDefinition result;
+                if (!this.partShimMap.TryGetValue(partDefinition, out result))
+                {
+                    result = this.partShimMap[partDefinition] = new MefV1ComposablePartDefinition(partDefinition);
+                }
+
+                return result;
+            }
+
+            private MefV1.Primitives.ExportDefinition GetShim(ExportDefinition exportDefinition)
+            {
+                MefV1ExportDefinition result;
+                if ((!this.exportShimMap.TryGetValue(exportDefinition, out result)))
+                {
+                    result = this.exportShimMap[exportDefinition] = new MefV1ExportDefinition(exportDefinition);
+                }
+
+                return result;
             }
 
             private class MefV1ComposablePart : MefV1.Primitives.ComposablePart
@@ -110,12 +135,14 @@
             private class MefV1ComposablePartDefinition : MefV1.Primitives.ComposablePartDefinition
             {
                 private readonly ComposablePartDefinition partDefinition;
+                private readonly ImmutableArray<MefV1ImportDefinition> importDefinitions;
 
                 internal MefV1ComposablePartDefinition(ComposablePartDefinition partDefinition)
                     : base()
                 {
                     Requires.NotNull(partDefinition, "partDefinition");
                     this.partDefinition = partDefinition;
+                    this.importDefinitions = this.partDefinition.Imports.Select(i => new MefV1ImportDefinition(i)).ToImmutableArray();
                 }
 
                 public override IEnumerable<MefV1.Primitives.ExportDefinition> ExportDefinitions
@@ -125,7 +152,7 @@
 
                 public override IEnumerable<MefV1.Primitives.ImportDefinition> ImportDefinitions
                 {
-                    get { return this.partDefinition.Imports.Select(i => new MefV1ImportDefinition(i)); }
+                    get { return this.importDefinitions; }
                 }
 
                 internal ComposablePartDefinition PartDefinition
@@ -133,20 +160,16 @@
                     get { return this.partDefinition; }
                 }
 
-                public override ComposablePart CreatePart()
+                public override MefV1.Primitives.ComposablePart CreatePart()
                 {
                     return new MefV1ComposablePart(this);
-                }
-
-                internal static MefV1.Primitives.ComposablePartDefinition Wrap(ComposablePartDefinition part)
-                {
-                    return new MefV1ComposablePartDefinition(part);
                 }
             }
 
             private class MefV1ImportDefinition : MefV1.Primitives.ImportDefinition
             {
                 private readonly ImportDefinitionBinding importDefinitionBinding;
+                private Expression<Func<MefV1.Primitives.ExportDefinition, bool>> constraint;
 
                 internal MefV1ImportDefinition(ImportDefinitionBinding importDefinition)
                 {
@@ -156,6 +179,24 @@
                 public override string ContractName
                 {
                     get { return this.importDefinitionBinding.ImportDefinition.ContractName; }
+                }
+
+                public override Expression<Func<MefV1.Primitives.ExportDefinition, bool>> Constraint
+                {
+                    get
+                    {
+                        if (this.constraint == null)
+                        {
+                            this.constraint = ed => this.IsConstraintSatisfiedBy(ed);
+                        }
+
+                        return this.constraint;
+                    }
+                }
+
+                public override bool IsPrerequisite
+                {
+                    get { return !this.importDefinitionBinding.ImportingParameterRef.IsEmpty; }
                 }
 
                 internal ImportDefinitionBinding ImportDefinitionBinding
@@ -188,11 +229,6 @@
                 public override string ContractName
                 {
                     get { return this.exportDefinition.ContractName; }
-                }
-
-                internal static MefV1.Primitives.ExportDefinition Wrap(ExportDefinition exportDefinition)
-                {
-                    return new MefV1ExportDefinition(exportDefinition);
                 }
 
                 internal static ExportDefinition Unwrap(MefV1.Primitives.ExportDefinition exportDefinition)
