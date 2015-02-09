@@ -62,8 +62,6 @@
         /// </remarks>
         private readonly Lazy<ImmutableArray<Lazy<IMetadataViewProvider, IReadOnlyDictionary<string, object>>>> metadataViewProviders;
 
-        private readonly object syncObject = new object();
-
         /// <summary>
         /// A map of shared boundary names to their shared instances.
         /// The value is a dictionary of types to their lazily-constructed instances and state.
@@ -257,7 +255,13 @@
             var exportsSnapshot = exports.ToArray(); // avoid repeating all the foregoing work each time this sequence is enumerated.
             if (importDefinition.Cardinality == ImportCardinality.ExactlyOne && exportsSnapshot.Length != 1)
             {
-                throw new CompositionFailedException();
+                throw new CompositionFailedException(
+                    String.Format(
+                        CultureInfo.CurrentCulture,
+                        Strings.UnexpectedNumberOfExportsFound,
+                        1,
+                        importDefinition.ContractName,
+                        exportsSnapshot.Length));
             }
 
             return exportsSnapshot;
@@ -295,9 +299,29 @@
                     }
                 }
 
+                // Take care to give all disposal parts a chance to dispose
+                // even if some parts throw exceptions.
+                List<Exception> exceptions = null;
                 foreach (var item in disposableSnapshot)
                 {
-                    item.Dispose();
+                    try
+                    {
+                        item.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        if (exceptions == null)
+                        {
+                            exceptions = new List<Exception>();
+                        }
+
+                        exceptions.Add(ex);
+                    }
+                }
+
+                if (exceptions != null)
+                {
+                    throw new AggregateException(Strings.ContainerDisposalEncounteredExceptions, exceptions);
                 }
             }
         }
@@ -551,9 +575,9 @@
 
         private bool TryGetSharedInstanceFactory(string partSharingBoundary, TypeRef partTypeRef, out PartLifecycleTracker value)
         {
-            lock (this.syncObject)
+            var sharingBoundary = this.AcquireSharingBoundaryInstances(partSharingBoundary);
+            lock (sharingBoundary)
             {
-                var sharingBoundary = AcquireSharingBoundaryInstances(partSharingBoundary);
                 bool result = sharingBoundary.TryGetValue(partTypeRef, out value);
                 return result;
             }
@@ -564,9 +588,9 @@
             Requires.NotNull(partTypeRef, "partTypeRef");
             Requires.NotNull(value, "value");
 
-            lock (this.syncObject)
+            var sharingBoundary = this.AcquireSharingBoundaryInstances(partSharingBoundary);
+            lock (sharingBoundary)
             {
-                var sharingBoundary = AcquireSharingBoundaryInstances(partSharingBoundary);
                 PartLifecycleTracker priorValue;
                 if (sharingBoundary.TryGetValue(partTypeRef, out priorValue))
                 {
@@ -779,6 +803,12 @@
             return metadataViewProvider;
         }
 
+        /// <summary>
+        /// Gets the shared parts dictionary with a given sharing boundary name.
+        /// </summary>
+        /// <param name="sharingBoundaryName">The name of the sharing boundary.</param>
+        /// <returns>The dictionary containing parts and instances. Never null.</returns>
+        /// <exception cref="CompositionFailedException">Thrown if the dictionary for the given sharing boundary isn't found.</exception>
         private Dictionary<TypeRef, PartLifecycleTracker> AcquireSharingBoundaryInstances(string sharingBoundaryName)
         {
             Requires.NotNull(sharingBoundaryName, "sharingBoundaryName");
@@ -954,9 +984,7 @@
 
                 if (this.Value == null)
                 {
-                    Type partType = this.PartType;
-                    string partTypeName = partType != null ? partType.FullName : string.Empty;
-                    throw new CompositionFailedException(string.Format(CultureInfo.CurrentCulture, "This part ({0}) cannot be instantiated.", partTypeName));
+                    this.ThrowPartNotInstantiableException();
                 }
 
                 return this.Value;
@@ -1024,6 +1052,16 @@
                         this.deferredInitializationParts.Add(importedPart);
                     }
                 }
+            }
+
+            /// <summary>
+            /// Throws a <see cref="CompositionFailedException"/> indicating the part cannot be instantiated.
+            /// </summary>
+            protected void ThrowPartNotInstantiableException()
+            {
+                Type partType = this.PartType;
+                string partTypeName = partType != null ? partType.FullName : string.Empty;
+                throw new CompositionFailedException(string.Format(CultureInfo.CurrentCulture, Strings.PartIsNotInstantiable, partTypeName));
             }
 
             /// <summary>
