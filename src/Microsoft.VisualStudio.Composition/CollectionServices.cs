@@ -27,7 +27,7 @@ namespace Microsoft.VisualStudio.Composition
             // Most common .Net collections implement IList as well so for those
             // cases we can optimize the wrapping instead of using reflection to create
             // a generic type.
-            if (typeof(IList).IsAssignableFrom(collectionObject.GetType()))
+            if (typeof(IList).GetTypeInfo().IsAssignableFrom(collectionObject.GetType().GetTypeInfo()))
             {
                 return new CollectionOfObjectList((IList)collectionObject);
             }

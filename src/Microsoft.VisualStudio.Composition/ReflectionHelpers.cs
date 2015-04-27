@@ -111,14 +111,14 @@
 
                 bool valueTypeKnownExactly =
                     export.ExportingMemberRef.IsEmpty || // When [Export] appears on the type itself, we instantiate that exact type.
-                    exportingType.IsSealed;
+                    exportingType.GetTypeInfo().IsSealed;
                 if (valueTypeKnownExactly)
                 {
                     // There is no way that an exported value can implement the required types to make it assignable.
                     return Assignability.DefinitelyNot;
                 }
 
-                if (receivingType.IsInterface || exportingType.IsAssignableFrom(receivingType))
+                if (receivingType.GetTypeInfo().IsInterface || exportingType.GetTypeInfo().IsAssignableFrom(receivingType.GetTypeInfo()))
                 {
                     // The actual exported value at runtime *may* be a derived type that *is* assignable to the import site.
                     return Assignability.Maybe;
@@ -484,9 +484,9 @@
 
             // The generic type arguments may be buried in the base type of the "constructedType" that we were given.
             var constructedGenericType = constructedType;
-            while (constructedGenericType != null && (!constructedGenericType.IsGenericType || !genericTypeDefinitionInfo.IsAssignableFrom(constructedGenericType.GetGenericTypeDefinition().GetTypeInfo())))
+            while (constructedGenericType != null && (!constructedGenericType.GetTypeInfo().IsGenericType || !genericTypeDefinitionInfo.IsAssignableFrom(constructedGenericType.GetGenericTypeDefinition().GetTypeInfo())))
             {
-                constructedGenericType = constructedGenericType.BaseType;
+                constructedGenericType = constructedGenericType.GetTypeInfo().BaseType;
             }
 
             Requires.Argument(constructedGenericType != null, "constructedType", Strings.NotClosedFormOfOther);

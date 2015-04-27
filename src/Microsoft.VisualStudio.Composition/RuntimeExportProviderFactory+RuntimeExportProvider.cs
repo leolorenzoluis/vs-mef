@@ -104,7 +104,7 @@
 
                 if (exportedValue != null)
                 {
-                    if (!import.ImportingSiteTypeWithoutCollection.IsAssignableFrom(exportedValue.GetType()))
+                    if (!import.ImportingSiteTypeWithoutCollection.GetTypeInfo().IsAssignableFrom(exportedValue.GetType().GetTypeInfo()))
                     {
                         throw new CompositionFailedException(
                             string.Format(

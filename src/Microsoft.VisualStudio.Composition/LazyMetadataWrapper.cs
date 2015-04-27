@@ -273,7 +273,7 @@
                 if (value != null)
                 {
                     Type valueType = value.GetType();
-                    if (valueType.IsEnum && Enum.GetUnderlyingType(valueType) == typeof(int) && IsTypeWorthDeferring(valueType))
+                    if (valueType.GetTypeInfo().IsEnum && Enum.GetUnderlyingType(valueType) == typeof(int) && IsTypeWorthDeferring(valueType))
                     {
                         substitutedValue = new Enum32Substitution(TypeRef.Get(valueType), (int)value);
                         return true;

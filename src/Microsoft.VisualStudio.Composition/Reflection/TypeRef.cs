@@ -51,7 +51,7 @@
         {
             Requires.NotNull(type, "type");
 
-            this.AssemblyName = GetNormalizedAssemblyName(type.Assembly.GetName());
+            this.AssemblyName = GetNormalizedAssemblyName(type.GetTypeInfo().Assembly.GetName());
             this.IsArray = type.IsArray;
 
             Type elementType = type.IsArray ? type.GetElementType() : type;

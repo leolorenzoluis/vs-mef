@@ -5,6 +5,7 @@
     using System.Collections.Immutable;
     using System.IO;
     using System.Linq;
+    using System.Reflection;
     using System.Text;
     using System.Threading.Tasks;
     using Microsoft.VisualStudio.Composition.Reflection;
@@ -29,7 +30,7 @@
                 ImmutableList<ImportDefinitionBinding>.Empty,
                 string.Empty,
                 default(MethodRef),
-                ConstructorRef.Get(providerType.GetConstructor(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance, null, new Type[0], null)),
+                ConstructorRef.Get(providerType.GetTypeInfo().GetConstructor(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance, null, new Type[0], null)),
                 ImmutableList<ImportDefinitionBinding>.Empty,
                 CreationPolicy.Shared,
                 false);

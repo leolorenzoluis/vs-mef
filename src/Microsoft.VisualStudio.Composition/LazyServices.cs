@@ -26,7 +26,7 @@
         /// <returns><c>true</c> if <paramref name="type"/> is some Lazy type.</returns>
         internal static bool IsAnyLazyType(this Type type)
         {
-            if (type.IsGenericType)
+            if (type.GetTypeInfo().IsGenericType)
             {
                 Type genericTypeDefinition = type.GetGenericTypeDefinition();
                 if (genericTypeDefinition == typeof(Lazy<>) || genericTypeDefinition == typeof(Lazy<,>))

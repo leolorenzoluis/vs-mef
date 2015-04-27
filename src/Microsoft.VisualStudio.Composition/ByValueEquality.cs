@@ -280,8 +280,8 @@
                     {
                         // Whitelist Type[] and RuntimeType[] arrays as equivalent.
                         if (!(x.GetType().IsArray && y.GetType().IsArray &&
-                            typeof(Type).IsAssignableFrom(x.GetType().GetElementType()) &&
-                            typeof(Type).IsAssignableFrom(y.GetType().GetElementType())))
+                            typeof(Type).GetTypeInfo().IsAssignableFrom(x.GetType().GetElementType().GetTypeInfo()) &&
+                            typeof(Type).GetTypeInfo().IsAssignableFrom(y.GetType().GetElementType().GetTypeInfo())))
                         {
                             return false;
                         }

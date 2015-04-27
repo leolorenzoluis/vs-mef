@@ -65,7 +65,7 @@
             }
 
             var importsWithGenericTypeParameters = this.Definition.Imports
-                .Where(import => import.ImportingSiteElementType.ContainsGenericParameters).ToList();
+                .Where(import => import.ImportingSiteElementType.GetTypeInfo().ContainsGenericParameters).ToList();
             foreach (var import in importsWithGenericTypeParameters)
             {
                 yield return new ComposedPartDiagnostic(

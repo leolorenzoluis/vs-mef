@@ -304,7 +304,7 @@
             var referencedEmbeddableTypes = new HashSet<string>(from assembly in referencedAssemblies
                                                                 where assembly.IsEmbeddableAssembly()
                                                                 from type in assembly.GetExportedTypes()
-                                                                where !type.IsAttributeDefined<TypeIdentifierAttribute>() // embedded types are not embeddable -- we'll have to synthesize them ourselves
+                                                                where !type.GetTypeInfo().IsAttributeDefined<TypeIdentifierAttribute>() // embedded types are not embeddable -- we'll have to synthesize them ourselves
                                                                 select type.FullName);
 
             embeddedTypes = embeddedTypes.Distinct(EquivalentTypesComparer.Instance)
